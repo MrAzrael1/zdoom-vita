@@ -1,7 +1,7 @@
 ---
-name: "[BUG REPORT] Title goes here."
+name: Bug Report
 about: Create a bug report to help ZDoom Vita improve.
-title: "[BUG]"
+title: "[BUG] Title goes here"
 labels: bug
 assignees: MrAzrael1
 type: Bug

@@ -1,7 +1,7 @@
 ---
-name: "[FEATURE REQUEST] Title goes here."
+name: Feature Request
 about: Suggest an idea for this project.
-title: "[FEATURE REQUEST]"
+title: "[FEATURE REQUEST] Title goes here"
 labels: enhancement
 assignees: MrAzrael1
 type: Feature
@@ -17,5 +17,5 @@ A clear description of what you want to happen or see.
 **Describe alternatives you've considered**
 A clear description of any alternative solutions or features you've considered.
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+**Additional context (Optional)**
+Add any other context or screenshots about the feature request here, if you desire.
