@@ -25,7 +25,7 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Clock Rate**
-Specify the clock rate used while this behavior occurring. Issue reports concerning performance at sub-500MHz clock rates will not be taken into consideration at this time.
+Specify the clock rate used while this behavior is occurring. Issue reports concerning performance at sub-500MHz clock rates will not be taken into consideration at this time.
 
 **Mods and/or IWADs used (provide download links for mods):**
 Place 'em here. List IWADs first, then mods after.
