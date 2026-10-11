@@ -8,13 +8,13 @@ Overclocking to 500MHz with PSVshell is highly recommended.
 
 Supports Hexen, Heretic, and Strife out of the box. Other IWADs probably work fine too.
 
-You can modify screen scaling under Options > Vita Settings. Your FPS will vary with these options, with 2X giving you the best performance.
+You can modify screen scaling and various other things under Options > Vita Settings. Your FPS will vary with these options, with 2X giving you the best performance.
 
 Your mileage will vary with mod support. As a general rule of thumb any ZDoom compatible mods released before 2016 might work. Mods released after that which require GZDoom or more modern features might not work. I would recommend against running any particularly crazy mods or maps, the performance probably won't be great.
 
 Anything that outright requires GZDoom *WILL NOT* work and I cannot fix this as it is outside of the scope of this project. Better Vita porters than I have said that GZDoom is just not possible due to the hardware so I tried this instead for the heck of it.
 
-If you have issues, general comments, or feature requests, contact me at misterazrael1@gmail.com or on Discord under misterazrael. I'm always interested in any good ideas anyone might have for future improvements, so shoot them my way if you got 'em.
+If you have issues, general comments, or feature requests, contact me at misterazrael1@gmail.com or you can join my discord at https://discord.gg/sbvV2VPYtY for a faster response time if you don't feel like submitting an issue here on Github. I'm always interested in any good ideas anyone might have for future improvements, so shoot them my way if you got 'em.
 
 
 
