@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <pwd.h>
-#if !defined(__sun)
+#if !defined(__sun) && !defined(ZD_VITA)
 #include <fts.h>
 #endif
 #endif
@@ -865,6 +865,19 @@ FString NicePath(const char *path)
 		return ExpandEnvVars(path);
 	}
 
+#ifdef ZD_VITA
+	const char *home = getenv("HOME");
+	if ((path[1] == '/' || path[1] == '\0') && home != NULL && *home != '\0')
+	{
+		FString where(home);
+		if (path[1] == '/')
+		{
+			where += ExpandEnvVars(path + 1);
+		}
+		return where;
+	}
+	return ExpandEnvVars(path);
+#else
 	passwd *pwstruct;
 	const char *slash;
 
@@ -893,6 +906,7 @@ FString NicePath(const char *path)
 		where += ExpandEnvVars(slash);
 	}
 	return where;
+#endif
 #endif
 }
 
@@ -957,7 +971,7 @@ void ScanDirectory(TArray<FFileList> &list, const char *dirpath)
 	}
 }
 
-#elif defined(__sun) || defined(__linux__)
+#elif defined(__sun) || defined(__linux__) || defined(ZD_VITA)
 
 //==========================================================================
 //

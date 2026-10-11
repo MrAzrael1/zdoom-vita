@@ -22,7 +22,12 @@ EXTERN_CVAR(Bool, joy_xinput)
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
-CUSTOM_CVAR(Bool, use_joystick, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+#ifdef ZD_VITA
+#define DEFAULT_USE_JOYSTICK true
+#else
+#define DEFAULT_USE_JOYSTICK false
+#endif
+CUSTOM_CVAR(Bool, use_joystick, DEFAULT_USE_JOYSTICK, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
 {
 #ifdef _WIN32
 	joy_ps2raw.Callback();

@@ -197,7 +197,12 @@ CCMD (snd_listmididevices)
 
 // Everything but Windows uses this code.
 
-CUSTOM_CVAR(Int, snd_mididevice, -1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#ifdef ZD_VITA
+#define DEFAULT_MIDI_DEVICE -3
+#else
+#define DEFAULT_MIDI_DEVICE -1
+#endif
+CUSTOM_CVAR(Int, snd_mididevice, DEFAULT_MIDI_DEVICE, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
 	if (self < -6)
 		self = -6;

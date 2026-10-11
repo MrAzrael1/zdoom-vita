@@ -37,3 +37,20 @@
 /jpeg-6b/x64/
 /lzma/x64/
 /zlib/x64/
+
+# Vita builds and local development inputs
+/build/
+/build-*/
+*.vpk
+*.velf
+*.self
+*.elf
+*.map
+*.log
+*.sf2
+*.tmp
+*.tmp.py
+__pycache__/
+/DOOM1.WAD
+/freedoom1.wad
+/freedoom2.wad

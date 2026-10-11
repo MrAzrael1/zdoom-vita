@@ -525,7 +525,10 @@ int LoadConfig(const char *filename)
 	 *			  that needs to be added to the search path.
 	 */
 	pathExpander.clearPathlist();
-#ifdef _WIN32
+#ifdef ZD_VITA
+	pathExpander.addToPathlist("ux0:data/zdoom-vita");
+	pathExpander.addToPathlist("app0:/");
+#elif defined(_WIN32)
 	pathExpander.addToPathlist("C:\\TIMIDITY");
 	pathExpander.addToPathlist("\\TIMIDITY");
 	pathExpander.addToPathlist(progdir);
@@ -746,7 +749,23 @@ void Renderer::ComputeOutput(float *buffer, int count)
 	{
 		if (v->status & VOICE_RUNNING)
 		{
-			mix_voice(this, buffer, v, count);
+			if (v->sample->type == INST_SF2)
+			{
+				// SF2 delay/hold use sample_count, advanced by mix_voice.
+				// Keep that clock current at the existing envelope control
+				// rate, even when MIDI requests a large rendering block.
+				int rendered = 0;
+				while (rendered < count && (v->status & VOICE_RUNNING))
+				{
+					int chunk = MIN(count - rendered, control_ratio);
+					mix_voice(this, buffer + rendered * 2, v, chunk);
+					rendered += chunk;
+				}
+			}
+			else
+			{
+				mix_voice(this, buffer, v, count);
+			}
 		}
 	}
 }

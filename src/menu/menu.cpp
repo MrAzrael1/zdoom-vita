@@ -1,3 +1,5 @@
+#include "m_misc.h"
+#include "posix/vita_input.h"
 /*
 ** menu.cpp
 ** Menu base class and global interface
@@ -552,6 +554,9 @@ bool M_Responder (event_t *ev)
 				mkey = MKEY_Enter;
 				break;
 
+#ifdef ZD_VITA
+			case KEY_ESCAPE: // Vita Start uses Escape to open and close menus.
+#endif
 			case KEY_JOY2:
 			case KEY_PAD_B:
 				mkey = MKEY_Back;
@@ -717,6 +722,9 @@ void M_Drawer (void)
 	{
 		if (DMenu::CurrentMenu->DimAllowed()) screen->Dim(fade);
 		DMenu::CurrentMenu->Drawer();
+#ifdef ZD_VITA
+		I_VitaDrawTouchCursor();
+#endif
 	}
 }
 
@@ -728,6 +736,9 @@ void M_Drawer (void)
 
 void M_ClearMenus ()
 {
+#ifdef ZD_VITA
+	bool saveConfig = menuactive != MENU_Off;
+#endif
 	M_DemoNoPlay = false;
 	if (DMenu::CurrentMenu != NULL)
 	{
@@ -736,6 +747,9 @@ void M_ClearMenus ()
 	}
 	V_SetBorderNeedRefresh();
 	menuactive = MENU_Off;
+#ifdef ZD_VITA
+	if (saveConfig) M_VitaSaveConfig(true);
+#endif
 }
 
 //=============================================================================
@@ -949,6 +963,9 @@ CCMD(menuconsole)
 {
 	M_ClearMenus();
 	C_ToggleConsole();
+#ifdef ZD_VITA
+	I_VitaOpenConsoleKeyboard();
+#endif
 }
 
 CCMD(reset2defaults)

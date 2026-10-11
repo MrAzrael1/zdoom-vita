@@ -470,6 +470,11 @@ FString M_GetSavegamesPath()
 
 FString GetUserFile (const char *file)
 {
+#ifdef ZD_VITA
+	FString vitaPath = "ux0:data/zdoom-vita/";
+	vitaPath += file;
+	return vitaPath;
+#else
 	FString path;
 	struct stat info;
 
@@ -523,6 +528,7 @@ FString GetUserFile (const char *file)
 	}
 	path += file;
 	return path;
+#endif
 }
 
 //===========================================================================
@@ -537,7 +543,11 @@ FString M_GetCachePath(bool create)
 {
 	// Don't use GAME_DIR and such so that ZDoom and its child ports can
 	// share the node cache.
+#ifdef ZD_VITA
+	FString path = "ux0:data/zdoom-vita";
+#else
 	FString path = NicePath("~/.config/zdoom/cache");
+#endif
 	if (create)
 	{
 		CreatePath(path);
@@ -610,7 +620,11 @@ FString M_GetConfigPath(bool for_reading)
 
 FString M_GetScreenshotsPath()
 {
+	#ifdef ZD_VITA
+	return "ux0:data/zdoom-vita/";
+#else
 	return NicePath("~/" GAME_DIR "/screenshots/");
+#endif
 }
 
 //===========================================================================
@@ -623,7 +637,11 @@ FString M_GetScreenshotsPath()
 
 FString M_GetSavegamesPath()
 {
+	#ifdef ZD_VITA
+	return "ux0:data/zdoom-vita/";
+#else
 	return NicePath("~/" GAME_DIR);
+#endif
 }
 
 #endif

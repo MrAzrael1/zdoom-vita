@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 /*
 ** gameconfigfile.cpp
 ** An .ini parser specifically for zdoom.ini
@@ -85,16 +86,32 @@ FGameConfigFile::FGameConfigFile ()
 
 	OkayToWrite = false;	// Do not allow saving of the config before DoGameSetup()
 	bModSetup = false;
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: resolving read path\n");
+#endif
 	pathname = GetConfigPath (true);
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: read path %s\n", pathname.GetChars());
+#endif
 	ChangePathName (pathname);
 	LoadConfigFile ();
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: file load complete\n");
+#endif
+
 
 	// If zdoom.ini was read from the program directory, switch
 	// to the user directory now. If it was read from the user
 	// directory, this effectively does nothing.
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: resolving write path\n");
+#endif
 	pathname = GetConfigPath (false);
 	ChangePathName (pathname);
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: creating IWAD search defaults\n");
+#endif
 	// Set default IWAD search paths if none present
 	if (!SetSection ("IWADSearch.Directories"))
 	{
@@ -128,7 +145,10 @@ FGameConfigFile::FGameConfigFile ()
 			local_app_support << cpath << "/" GAME_DIR;
 			SetValueForKey("Path", local_app_support, true);
 		}
-#elif !defined(__unix__)
+		#elif defined(ZD_VITA)
+		SetValueForKey ("Path", "ux0:data/zdoom-vita/", true);
+		SetValueForKey ("Path", "$PROGDIR", true);
+		#elif !defined(__unix__)
 		SetValueForKey ("Path", "$HOME", true);
 		SetValueForKey ("Path", "$PROGDIR", true);
 #else
@@ -143,6 +163,9 @@ FGameConfigFile::FGameConfigFile ()
 #endif
 	}
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: creating resource search defaults\n");
+#endif
 	// Set default search paths if none present
 	if (!SetSection ("FileSearch.Directories"))
 	{
@@ -152,7 +175,10 @@ FGameConfigFile::FGameConfigFile ()
 		SetValueForKey ("Path", user_app_support, true);
 		SetValueForKey ("Path", "$PROGDIR", true);
 		SetValueForKey ("Path", local_app_support, true);
-#elif !defined(__unix__)
+		#elif defined(ZD_VITA)
+		SetValueForKey ("Path", "ux0:data/zdoom-vita/", true);
+		SetValueForKey ("Path", "$PROGDIR", true);
+		#elif !defined(__unix__)
 		SetValueForKey ("Path", "$PROGDIR", true);
 #else
 		SetValueForKey ("Path", "~/" GAME_DIR, true);
@@ -161,6 +187,9 @@ FGameConfigFile::FGameConfigFile ()
 		SetValueForKey ("Path", "$DOOMWADDIR", true);
 	}
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: adding section notes\n");
+#endif
 	// Add some self-documentation.
 	SetSectionNote("IWADSearch.Directories",
 		"# These are the directories to automatically search for IWADs.\n"

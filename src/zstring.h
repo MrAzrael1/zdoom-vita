@@ -120,9 +120,18 @@ struct FNullStringData
 	char Nothing[2];
 };
 
+#ifdef ZD_VITA
+// This is an integer resource index, not a small set of enum values.
+// Vita's default enum layout otherwise truncates indices above 255.
+enum ELumpNum : int
+{
+};
+static_assert(sizeof(ELumpNum) == sizeof(int), "Resource indices must retain all integer bits");
+#else
 enum ELumpNum
 {
 };
+#endif
 
 class FString
 {

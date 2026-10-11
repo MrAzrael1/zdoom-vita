@@ -44,9 +44,9 @@ if(__create_launchers)
 endif()
 set(__create_launchers YES)
 
-if( POLICY CMP0026 )
+if( MSVC AND POLICY CMP0026 AND CMAKE_VERSION VERSION_LESS "4.0" )
 	cmake_policy( SET CMP0026 OLD )
-endif( POLICY CMP0026 )
+endif()
 
 include(CleanDirectoryList)
 

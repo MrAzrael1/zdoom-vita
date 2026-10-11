@@ -63,6 +63,9 @@
 #include "r_utility.h"
 #include "r_renderer.h"
 #include "menu/menu.h"
+#ifdef ZD_VITA
+#include "posix/vita_scaling.h"
+#endif
 #include "r_data/voxels.h"
 
 
@@ -150,10 +153,22 @@ static DWORD Col2RGB8_2[63][256];
 // There's also only one, not four.
 DFrameBuffer *screen;
 
-CVAR (Int, vid_defwidth, 640, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-CVAR (Int, vid_defheight, 480, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#ifdef ZD_VITA
+#define DEFAULT_VIDEO_WIDTH 480
+#define DEFAULT_VIDEO_HEIGHT 272
+#else
+#define DEFAULT_VIDEO_WIDTH 640
+#define DEFAULT_VIDEO_HEIGHT 480
+#endif
+CVAR (Int, vid_defwidth, DEFAULT_VIDEO_WIDTH, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR (Int, vid_defheight, DEFAULT_VIDEO_HEIGHT, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (Int, vid_defbits, 8, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#ifdef ZD_VITA
+// Temporary performance debug overlay, including frame milliseconds.
 CVAR (Bool, vid_fps, false, 0)
+#else
+CVAR (Bool, vid_fps, false, 0)
+#endif
 CVAR (Bool, ticker, false, 0)
 CVAR (Int, vid_showpalette, 0, 0)
 
@@ -190,6 +205,27 @@ CVAR (Color, dimcolor, 0xffd700, CVAR_ARCHIVE)
 bool	setmodeneeded = false;
 // [RH] Resolution to change to when setmodeneeded is true
 int		NewWidth, NewHeight, NewBits;
+
+#ifdef ZD_VITA
+CVAR(Int, vita_defaults_revision, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Archived independently of older vid_defwidth/height values.
+CUSTOM_CVAR(Int, vita_scaling, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0 || self >= 4) self = 0;
+	VitaRenderSize size = I_VitaRenderSize(self);
+	vid_defwidth = size.width;
+	vid_defheight = size.height;
+	if (screen != NULL && gamestate != GS_STARTUP)
+	{
+		NewWidth = size.width;
+		NewHeight = size.height;
+		NewBits = DisplayBits;
+		setmodeneeded = true;
+	}
+}
+#endif
+
+
 
 
 //
@@ -1530,6 +1566,13 @@ void V_Init (bool restart)
 
 	if (!restart)
 	{
+#ifdef ZD_VITA
+		if (vita_defaults_revision < 1)
+		{
+			vita_scaling=0;
+			vita_defaults_revision=1;
+		}
+#endif
 		width = height = bits = 0;
 
 		if ( (i = Args->CheckValue ("-width")) )
@@ -1545,8 +1588,14 @@ void V_Init (bool restart)
 		{
 			if (height == 0)
 			{
+#ifdef ZD_VITA
+				VitaRenderSize size = I_VitaRenderSize(vita_scaling);
+				width = size.width;
+				height = size.height;
+#else
 				width = vid_defwidth;
 				height = vid_defheight;
+#endif
 			}
 			else
 			{

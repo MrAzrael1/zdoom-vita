@@ -291,7 +291,11 @@ MIDIDevice *MIDIStreamer::CreateMIDIDevice(EMidiDevice devtype) const
 		}
 
 	case MDEV_TIMIDITY:
+#ifdef ZD_VITA
+		return new TimidityMIDIDevice(Args);
+#else
 		return new TimidityPPMIDIDevice(Args);
+#endif
 
 	case MDEV_WILDMIDI:
 		return new WildMIDIDevice(Args);

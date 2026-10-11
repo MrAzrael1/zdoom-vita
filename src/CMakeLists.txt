@@ -11,12 +11,18 @@ include( CheckLibraryExists )
 include( FindPkgConfig )
 
 if( NOT APPLE )
+	if( VITA )
+		set( NO_ASM ON CACHE BOOL "Disable assembly code" )
+	endif( VITA )
 	option( NO_ASM "Disable assembly code" OFF )
 else( NOT APPLE )
 	# At the moment asm code doesn't work with OS X, so disable by default
 	option( NO_ASM "Disable assembly code" ON )
 endif( NOT APPLE )
 if( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
+	if( VITA )
+		set( NO_STRIP ON CACHE BOOL "Do not strip Release or MinSizeRel builds" )
+	endif( VITA )
 	option( NO_STRIP "Do not strip Release or MinSizeRel builds" )
 	# At least some versions of Xcode fail if you strip with the linker
 	# instead of the separate strip utility.
@@ -25,6 +31,9 @@ if( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
 	endif( APPLE )
 endif( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
 
+if( VITA )
+	set( DYN_FLUIDSYNTH OFF CACHE BOOL "Dynamically load fluidsynth" )
+endif( VITA )
 option( DYN_FLUIDSYNTH "Dynamically load fluidsynth" ON )
 
 if( APPLE )
@@ -167,6 +176,9 @@ else( WIN32 )
 		set( FMOD_LIB_PATH_SUFFIXES PATH_SUFFIXES lib )
 		set( NO_GTK ON )
 	else( APPLE )
+		if( VITA )
+			set( NO_GTK ON CACHE BOOL "Disable GTK+ dialogs (Not applicable to Windows)" )
+		endif( VITA )
 		option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" )
 		option( VALGRIND "Add special Valgrind sequences to self-modifying code" )
 
@@ -201,9 +213,15 @@ else( WIN32 )
 	
 	# Non-Windows version also needs SDL except native OS X backend
 	if( NOT APPLE OR NOT OSX_COCOA_BACKEND )
-		find_package( SDL2 REQUIRED )
-		include_directories( "${SDL2_INCLUDE_DIR}" )
-		set( ZDOOM_LIBS ${ZDOOM_LIBS} "${SDL2_LIBRARY}" )
+		if( VITA )
+			find_package( SDL2 CONFIG REQUIRED )
+			include_directories( ${SDL2_INCLUDE_DIRS} )
+			set( ZDOOM_LIBS ${ZDOOM_LIBS} SDL2::SDL2 )
+		else( VITA )
+			find_package( SDL2 REQUIRED )
+			include_directories( "${SDL2_INCLUDE_DIR}" )
+			set( ZDOOM_LIBS ${ZDOOM_LIBS} "${SDL2_LIBRARY}" )
+		endif( VITA )
 	endif( NOT APPLE OR NOT OSX_COCOA_BACKEND )
 
 	find_path( FPU_CONTROL_DIR fpu_control.h )
@@ -490,6 +508,11 @@ if( NOT STRUPR_EXISTS )
 	add_definitions( -DNEED_STRUPR=1 )
 endif( NOT STRUPR_EXISTS )
 
+CHECK_FUNCTION_EXISTS( strlwr STRLWR_EXISTS )
+if( NOT STRLWR_EXISTS )
+	add_definitions( -DNEED_STRLWR=1 )
+endif( NOT STRLWR_EXISTS )
+
 CHECK_FUNCTION_EXISTS( stricmp STRICMP_EXISTS )
 if( NOT STRICMP_EXISTS )
 	add_definitions( -Dstricmp=strcasecmp )
@@ -600,7 +623,6 @@ set( PLAT_POSIX_SOURCES
 	posix/i_movie.cpp
 	posix/i_steam.cpp )
 set( PLAT_SDL_SOURCES
-	posix/sdl/crashcatcher.c
 	posix/sdl/hardware.cpp
 	posix/sdl/i_gui.cpp
 	posix/sdl/i_input.cpp
@@ -610,6 +632,12 @@ set( PLAT_SDL_SOURCES
 	posix/sdl/i_timer.cpp
 	posix/sdl/sdlvideo.cpp
 	posix/sdl/st_start.cpp )
+if( VITA )
+	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES} posix/vita_launcher.cpp )
+	add_definitions( -DNO_CRASHCATCHER -DZD_VITA=1 )
+else( VITA )
+	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES} posix/sdl/crashcatcher.c )
+endif( VITA )
 set( PLAT_OSX_SOURCES
 	posix/osx/iwadpicker_cocoa.mm
 	posix/osx/zdoom.icns )
@@ -847,6 +875,13 @@ set( NOT_COMPILED_SOURCE_FILES
 	asm_x86_64/tmap3.asm
 	asm_x86_64/tmap3.s
 )
+
+if( VITA )
+	set( EXTERNAL_TIMIDITY_SOURCE )
+	set( VITA_SOUND_SOURCE sound/sdl_sound.cpp )
+else( VITA )
+	set( EXTERNAL_TIMIDITY_SOURCE sound/music_midi_timidity.cpp )
+endif( VITA )
 
 add_executable( zdoom WIN32 MACOSX_BUNDLE
 	${HEADER_FILES}
@@ -1088,6 +1123,7 @@ add_executable( zdoom WIN32 MACOSX_BUNDLE
 	sound/fmodsound.cpp
 	sound/i_music.cpp
 	sound/i_sound.cpp
+	${VITA_SOUND_SOURCE}
 	sound/mpg123_decoder.cpp
 	sound/music_cd.cpp
 	sound/music_dumb.cpp
@@ -1098,7 +1134,7 @@ add_executable( zdoom WIN32 MACOSX_BUNDLE
 	sound/music_xmi_midiout.cpp
 	sound/music_midistream.cpp
 	sound/music_midi_base.cpp
-	sound/music_midi_timidity.cpp
+	${EXTERNAL_TIMIDITY_SOURCE}
 	sound/music_mus_opl.cpp
 	sound/music_stream.cpp
 	sound/music_fluidsynth_mididevice.cpp
@@ -1312,9 +1348,22 @@ source_group("POSIX Files" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/posi
 source_group("Cocoa Files" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/posix/cocoa/.+")
 source_group("OS X Files" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/posix/osx/.+")
 source_group("SDL Files" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/posix/sdl/.+")
+
 source_group("SFMT" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/sfmt/.+")
 source_group("Shared Game" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/g_shared/.+")
 source_group("Versioning" FILES version.h win32/zdoom.rc)
 source_group("Win32 Files" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/win32/.+")
 source_group("Xlat" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/xlat/.+" FILES ${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.c ${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.h)
 source_group("Source Files" FILES ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h sc_man_scanner.re)
+
+if( VITA )
+	target_link_libraries(zdoom SceIme_stub)
+	if( FLUIDSYNTH_FOUND )
+		target_link_libraries(zdoom pthread)
+	endif()
+endif()
+
+if( VITA )
+    set_property( TARGET zdoom APPEND_STRING PROPERTY LINK_FLAGS
+        " -Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/posix/vita_sce_padding.ld" )
+endif()

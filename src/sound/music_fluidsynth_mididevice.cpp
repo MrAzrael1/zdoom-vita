@@ -43,6 +43,10 @@
 #include "w_wad.h"
 #include "v_text.h"
 #include "cmdlib.h"
+#ifdef ZD_VITA
+#include "../posix/vita_debug.h"
+#include <unistd.h>
+#endif
 
 // MACROS ------------------------------------------------------------------
 
@@ -104,19 +108,26 @@ CUSTOM_CVAR(Float, fluid_gain, 0.5, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 		currSong->FluidSettingNum("synth.gain", self);
 }
 
-CUSTOM_CVAR(Bool, fluid_reverb, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#ifdef ZD_VITA
+#define VITA_FLUID_EFFECTS_DEFAULT false
+#define VITA_FLUID_VOICES_DEFAULT 64
+#else
+#define VITA_FLUID_EFFECTS_DEFAULT true
+#define VITA_FLUID_VOICES_DEFAULT 128
+#endif
+CUSTOM_CVAR(Bool, fluid_reverb, VITA_FLUID_EFFECTS_DEFAULT, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
 	if (currSong != NULL)
 		currSong->FluidSettingInt("synth.reverb.active", self);
 }
 
-CUSTOM_CVAR(Bool, fluid_chorus, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Bool, fluid_chorus, VITA_FLUID_EFFECTS_DEFAULT, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
 	if (currSong != NULL)
 		currSong->FluidSettingInt("synth.chorus.active", self);
 }
 
-CUSTOM_CVAR(Int, fluid_voices, 128, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, fluid_voices, VITA_FLUID_VOICES_DEFAULT, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
 	if (self < 16)
 		self = 16;
@@ -301,6 +312,16 @@ FluidSynthMIDIDevice::FluidSynthMIDIDevice(const char *args)
 		res = LoadPatchSets(args);
 	}
 
+#ifdef ZD_VITA
+	if (res == 0 && (*fluid_patchset)[0] == 0)
+	{
+		// User bank takes priority; the packaged bank is optional testing data.
+		if (access("ux0:data/zdoom-vita/gm.sf2", R_OK) == 0)
+			res = LoadPatchSets("ux0:data/zdoom-vita/gm.sf2");
+		if (res == 0 && access("app0:/gm.sf2", R_OK) == 0)
+			res = LoadPatchSets("app0:/gm.sf2");
+	}
+#endif
 	if (res == 0 && 0 == LoadPatchSets(fluid_patchset))
 	{
 #ifdef __unix__
@@ -372,7 +393,14 @@ int FluidSynthMIDIDevice::Open(void (*callback)(unsigned int, void *, DWORD, DWO
 	{
 		return 2;
 	}
+#ifdef ZD_VITA
+	// Synthesis runs on the game thread: avoid quarter-second work bursts.
+	int ret = OpenStream(MAX(1, SampleRate / 512), 0, callback, userdata);
+	I_VitaTrace("[Vita] FluidSynth: stream open=%d rate=%d voices=%d\n",
+		ret, SampleRate, *fluid_voices);
+#else
 	int ret = OpenStream(4, 0, callback, userdata);
+#endif
 	if (ret == 0)
 	{
 		fluid_synth_system_reset(FluidSynth);
@@ -468,7 +496,7 @@ int FluidSynthMIDIDevice::LoadPatchSets(const char *patches)
 	int count;
 	char *wpatches = strdup(patches);
 	char *tok;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(ZD_VITA)
 	const char *const delim = ";";
 #else
 	const char *const delim = ":";
@@ -499,11 +527,17 @@ int FluidSynthMIDIDevice::LoadPatchSets(const char *patches)
 		if (FLUID_FAILED != fluid_synth_sfload(FluidSynth, path, count == 0))
 		{
 			DPrintf("Loaded patch set %s.\n", tok);
+#ifdef ZD_VITA
+			I_VitaTrace("[Vita] FluidSynth: loaded %s\n", tok);
+#endif
 			count++;
 		}
 		else
 		{
 			DPrintf("Failed to load patch set %s.\n", tok);
+#ifdef ZD_VITA
+			I_VitaTrace("[Vita] FluidSynth: FAILED %s\n", tok);
+#endif
 		}
 		tok = strtok(NULL, delim);
 	}
@@ -575,6 +609,15 @@ void FluidSynthMIDIDevice::FluidSettingInt(const char *setting, int value)
 
 void FluidSynthMIDIDevice::FluidSettingNum(const char *setting, double value)
 {
+#ifdef ZD_VITA
+	// The lite port uses float DSP; avoid its legacy double/float settings
+	// callback cast when changing gain on an already running synth.
+	if (FluidSynth != NULL && strcmp(setting, "synth.gain") == 0)
+	{
+		fluid_synth_set_gain(FluidSynth, value);
+		return;
+	}
+#endif
 	if (FluidSettings != NULL)
 	{
 		if (0 == fluid_settings_setnum(FluidSettings, setting, value))

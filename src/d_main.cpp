@@ -1,3 +1,5 @@
+#include "posix/vita_debug.h"
+#include "posix/vita_perf.h"
 // Emacs style mode select	 -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -38,7 +40,8 @@
 #endif
 #include <float.h>
 
-#if defined(__unix__) || defined(__APPLE__)
+#if defined(__unix__) || defined(__APPLE__) || defined(ZD_VITA)
+#include <sys/param.h>
 #include <unistd.h>
 #endif
 
@@ -761,7 +764,13 @@ void D_Display ()
 			screen->SetBlendingRect(viewwindowx, viewwindowy,
 				viewwindowx + viewwidth, viewwindowy + viewheight);
 
+#ifdef ZD_VITA
+			{ Uint64 vitaRenderStart = I_VitaPerfClock();
+#endif
 			Renderer->RenderView(&players[consoleplayer]);
+#ifdef ZD_VITA
+			I_VitaPerfAdd(VPERF_RENDER, vitaRenderStart); }
+#endif
 
 			if ((hw2d = screen->Begin2D(viewactive)))
 			{
@@ -974,6 +983,9 @@ void D_DoomLoop ()
 	{
 		try
 		{
+#ifdef ZD_VITA
+			Uint64 vitaFrameStart = I_VitaPerfClock();
+#endif
 			// frame syncronous IO operations
 			if (gametic > lasttic)
 			{
@@ -1005,8 +1017,19 @@ void D_DoomLoop ()
 			}
 			// Update display, next frame, with current state.
 			I_StartTic ();
+#ifdef ZD_VITA
+			I_VitaPerfAdd(VPERF_GAME, vitaFrameStart);
+			Uint64 vitaDisplayStart = I_VitaPerfClock();
+#endif
 			D_Display ();
-			S_UpdateMusic();	// OpenAL needs this to keep the music running, thanks to a complete lack of a sane streaming implementation using callbacks. :(
+#ifdef ZD_VITA
+			I_VitaPerfAdd(VPERF_DISPLAY, vitaDisplayStart);
+#endif
+			S_UpdateMusic();
+#ifdef ZD_VITA
+			I_VitaPerfFrame(vitaFrameStart);
+			M_VitaSaveConfig(false);
+#endif	// OpenAL needs this to keep the music running, thanks to a complete lack of a sane streaming implementation using callbacks. :(
 		}
 		catch (CRecoverableError &error)
 		{
@@ -1992,7 +2015,13 @@ static void D_DoomInit()
 		
 	FRandom::StaticClearRandom ();
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] D_DoomInit: before defaults banner\n");
+#endif
 	Printf ("M_LoadDefaults: Load system defaults.\n");
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] D_DoomInit: calling M_LoadDefaults\n");
+#endif
 	M_LoadDefaults ();			// load before initing other systems
 }
 
@@ -2250,6 +2279,9 @@ void D_DoomMain (void)
 	// [RH] Make sure zdoom.pk3 is always loaded,
 	// as it contains magic stuff we need.
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Resources: searching for zdoom.pk3\n");
+#endif
 	wad = BaseFileSearch (BASEWAD, NULL, true);
 	if (wad == NULL)
 	{
@@ -2258,7 +2290,14 @@ void D_DoomMain (void)
 	FString basewad = wad;
 
 	iwad_man = new FIWadManager;
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Resources: parsing IWAD information\n");
+#endif
 	iwad_man->ParseIWadInfos(basewad);
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Resources: IWAD information parsed\n");
+#endif
+
 
 	// Now that we have the IWADINFO, initialize the autoload ini sections.
 	GameConfig->DoAutoloadSetup(iwad_man);
@@ -2289,7 +2328,14 @@ void D_DoomMain (void)
 		if (iwad_man == NULL)
 		{
 			iwad_man = new FIWadManager;
-			iwad_man->ParseIWadInfos(basewad);
+		#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Resources: parsing IWAD information\n");
+#endif
+	iwad_man->ParseIWadInfos(basewad);
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Resources: IWAD information parsed\n");
+#endif
+
 		}
 		const FIWADInfo *iwad_info = iwad_man->FindIWAD(allwads, iwad, basewad);
 		gameinfo.gametype = iwad_info->gametype;
@@ -2357,17 +2403,26 @@ void D_DoomMain (void)
 		// [RH] Initialize localizable strings.
 		GStrings.LoadStrings (false);
 
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Startup: font colors\n");
+#endif
 		V_InitFontColors ();
 
 		// [RH] Moved these up here so that we can do most of our
 		//		startup output in a fullscreen console.
 
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Startup: color translations\n");
+#endif
 		CT_Init ();
 
 		if (!restart)
 		{
 			Printf ("I_Init: Setting up machine state.\n");
 			I_Init ();
+#ifdef ZD_VITA
+			I_VitaTrace("[Vita] Startup: software renderer\n");
+#endif
 			I_CreateRenderer();
 		}
 

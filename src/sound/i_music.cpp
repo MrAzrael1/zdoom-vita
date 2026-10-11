@@ -48,7 +48,9 @@
 #include "mus2midi.h"
 #define FALSE 0
 #define TRUE 1
+#ifndef ZD_VITA
 extern void ChildSigHandler (int signum);
+#endif
 #endif
 
 #include <ctype.h>
@@ -56,6 +58,12 @@ extern void ChildSigHandler (int signum);
 #include <stdio.h>
 
 #include "i_musicinterns.h"
+#ifdef ZD_VITA
+#include "../posix/vita_debug.h"
+EXTERN_CVAR(String, midi_config)
+EXTERN_CVAR(Bool, midi_dmxgus)
+CVAR(Int, vita_music_test_revision, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#endif
 #include "doomtype.h"
 #include "m_argv.h"
 #include "i_music.h"
@@ -149,7 +157,48 @@ void I_InitMusic (void)
 {
 	static bool setatterm = false;
 
+#ifdef ZD_VITA
+	// Explicit custom MIDI configuration retains the engine's normal behavior.
+	const char *vitaConfig = NULL;
+	if (strcmp(*midi_config, CONFIG_FILE) == 0)
+	{
+		if (access("ux0:data/zdoom-vita/timidity.cfg", R_OK) == 0)
+			vitaConfig = "ux0:data/zdoom-vita/timidity.cfg";
+		else if (access("app0:/vita-timidity.cfg", R_OK) == 0)
+			vitaConfig = "app0:/vita-timidity.cfg";
+	}
+	int configResult = vitaConfig ? Timidity::LoadConfig(vitaConfig) : Timidity::LoadConfig();
+	I_VitaTrace("[Vita] Music: config=%s result=%d\n",
+		vitaConfig ? vitaConfig : *midi_config, configResult);
+	// Enable the bundled test bank once; subsequent user selections persist.
+	if (vitaConfig && strcmp(vitaConfig, "app0:/vita-timidity.cfg") == 0)
+	{
+		bool loaded = Timidity::font_find("app0:/gm.sf2") != NULL;
+		I_VitaTrace("[Vita] Music: bundled SF2 %s\n", loaded ? "loaded" : "FAILED");
+		if (loaded && vita_music_test_revision < 1)
+		{
+			snd_mididevice = -4;
+			vita_music_test_revision = 1;
+		}
+		else if (!loaded && (snd_mididevice == -4 || snd_mididevice == -2))
+			snd_mididevice = -3;
+	}
+	else if (configResult != 0 && (snd_mididevice == -4 || snd_mididevice == -2))
+	{
+		I_VitaTrace("[Vita] Music: missing configuration; falling back to OPL\n");
+		snd_mididevice = -3;
+	}
+#ifdef HAVE_FLUIDSYNTH
+	if (access("app0:/gm.sf2", R_OK) == 0 && vita_music_test_revision < 2)
+	{
+		snd_mididevice = -5;
+		vita_music_test_revision = 2;
+	}
+#endif
+	I_VitaTrace("[Vita] Music: MIDI device=%d\n", *snd_mididevice);
+#else
 	Timidity::LoadConfig();
+#endif
 
 	snd_musicvolume.Callback ();
 
@@ -164,7 +213,7 @@ void I_InitMusic (void)
 		setatterm = true;
 		atterm (I_ShutdownMusicExit);
 	
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(ZD_VITA)
 		signal (SIGCHLD, ChildSigHandler);
 #endif
 	}

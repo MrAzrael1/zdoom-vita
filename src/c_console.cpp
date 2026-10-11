@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 /*
 ** c_console.cpp
 ** Implements the console itself
@@ -552,9 +553,18 @@ int PrintString (int printlevel, const char *outline)
 
 	if (printlevel != PRINT_LOG)
 	{
+#ifdef ZD_VITA
+		bool traceDefaults = strstr(outline, "M_LoadDefaults:") != NULL;
+		if (traceDefaults) I_VitaTrace("[Vita] Defaults banner: before I_PrintStr\n");
+#endif
 		I_PrintStr (outline);
-
+#ifdef ZD_VITA
+		if (traceDefaults) I_VitaTrace("[Vita] Defaults banner: before AddToConsole\n");
+#endif
 		AddToConsole (printlevel, outline);
+#ifdef ZD_VITA
+		if (traceDefaults) I_VitaTrace("[Vita] Defaults banner: after AddToConsole\n");
+#endif
 		if (vidactive && screen && SmallFont)
 		{
 			C_AddNotifyString (printlevel, outline);

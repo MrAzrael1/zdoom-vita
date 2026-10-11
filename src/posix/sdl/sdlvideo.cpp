@@ -1,3 +1,5 @@
+#include "posix/vita_debug.h"
+#include "posix/vita_perf.h"
 
 // HEADER FILES ------------------------------------------------------------
 
@@ -68,6 +70,9 @@ private:
 		SDL_Surface *Surface;
 	};
 
+#ifdef ZD_VITA
+	SDL_Rect VitaDestination;
+#endif
 	bool UsingRenderer;
 	bool NeedPalUpdate;
 	bool NeedGammaUpdate;
@@ -138,13 +143,22 @@ static MiniModeInfo WinModes[] =
 	{ 320, 240 },
 	{ 400, 225 },	// 16:9
 	{ 400, 300 },
+	#ifdef ZD_VITA
+	{ 480, 272 }, // Exact half-size Vita framebuffer
+	#endif
 	{ 480, 270 },	// 16:9
 	{ 480, 360 },
 	{ 512, 288 },	// 16:9
 	{ 512, 384 },
+#ifdef ZD_VITA
+	{ 600, 340 }, // 1.6x output scaling
+#endif
 	{ 640, 360 },	// 16:9
 	{ 640, 400 },
 	{ 640, 480 },
+#ifdef ZD_VITA
+	{ 720, 408 }, // 3/4-size Vita framebuffer, 4/3 output scale
+#endif
 	{ 720, 480 },	// 16:10
 	{ 720, 540 },
 	{ 800, 450 },	// 16:9
@@ -152,6 +166,9 @@ static MiniModeInfo WinModes[] =
 	{ 800, 500 },	// 16:10
 	{ 800, 600 },
 	{ 848, 480 },	// 16:9
+#ifdef ZD_VITA
+	{ 960, 544 },
+#endif
 	{ 960, 600 },	// 16:10
 	{ 960, 720 },
 	{ 1024, 576 },	// 16:9
@@ -363,7 +380,11 @@ SDLFB::SDLFB (int width, int height, bool fullscreen, SDL_Window *oldwin)
 		// appears to inevitably happen while compositor animations are running. So lets try
 		// to reuse the existing window.
 		Screen = oldwin;
+#ifdef ZD_VITA
+		SDL_SetWindowSize (Screen, 960, 544);
+#else
 		SDL_SetWindowSize (Screen, width, height);
+#endif
 		SetFullscreen (fullscreen);
 	}
 	else
@@ -371,9 +392,16 @@ SDLFB::SDLFB (int width, int height, bool fullscreen, SDL_Window *oldwin)
 		FString caption;
 		caption.Format(GAMESIG " %s (%s)", GetVersionString(), GetGitTime());
 
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Display: creating window %dx%d\n", width, height);
+#endif
 		Screen = SDL_CreateWindow (caption,
 			SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter), SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter),
+#ifdef ZD_VITA
+			960, 544, SDL_WINDOW_FULLSCREEN);
+#else
 			width, height, (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0)|SDL_WINDOW_RESIZABLE);
+#endif
 
 		if (Screen == NULL)
 			return;
@@ -462,7 +490,11 @@ void SDLFB::Update ()
 #ifndef __APPLE__
 	if(vid_maxfps && !cl_capfps)
 	{
+#ifdef ZD_VITA
+		I_WaitForFPSLimit();
+#else
 		SEMAPHORE_WAIT(FPSLimitSemaphore)
+#endif
 	}
 #endif
 
@@ -474,6 +506,9 @@ void SDLFB::Update ()
 	SDLFlipCycles.Reset();
 	BlitCycles.Clock();
 
+#ifdef ZD_VITA
+	Uint64 vitaConvertStart = I_VitaPerfClock();
+#endif
 	void *pixels;
 	int pitch;
 	if (UsingRenderer)
@@ -516,9 +551,23 @@ void SDLFB::Update ()
 		SDL_UnlockTexture (Texture);
 
 		SDLFlipCycles.Clock();
+#ifdef ZD_VITA
+		I_VitaPerfAdd(VPERF_CONVERT, vitaConvertStart);
+		Uint64 vitaPresentStart = I_VitaPerfClock();
+		// Opaque full-screen copies cover every pixel in exact-ratio modes.
+		if (VitaDestination.x != 0 || VitaDestination.y != 0) SDL_RenderClear(Renderer);
+#else
 		SDL_RenderClear(Renderer);
+#endif
+#ifdef ZD_VITA
+		SDL_RenderCopy(Renderer, Texture, NULL, &VitaDestination);
+#else
 		SDL_RenderCopy(Renderer, Texture, NULL, NULL);
+#endif
 		SDL_RenderPresent(Renderer);
+#ifdef ZD_VITA
+		I_VitaPerfAdd(VPERF_PRESENT, vitaPresentStart);
+#endif
 		SDLFlipCycles.Unclock();
 	}
 	else
@@ -632,6 +681,9 @@ void SDLFB::GetFlashedPalette (PalEntry pal[256])
 
 void SDLFB::SetFullscreen (bool fullscreen)
 {
+#ifdef ZD_VITA
+	fullscreen = true;
+#endif
 	if (IsFullscreen() == fullscreen)
 		return;
 
@@ -639,7 +691,11 @@ void SDLFB::SetFullscreen (bool fullscreen)
 	if (!fullscreen)
 	{
 		// Restore proper window size
+		#ifdef ZD_VITA
+		SDL_SetWindowSize (Screen, 960, 544);
+#else
 		SDL_SetWindowSize (Screen, Width, Height);
+#endif
 	}
 
 	ResetSDLRenderer ();
@@ -662,6 +718,9 @@ void SDLFB::ResetSDLRenderer ()
 	UsingRenderer = !vid_forcesurface;
 	if (UsingRenderer)
 	{
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Display: creating SDL renderer\n");
+#endif
 		Renderer = SDL_CreateRenderer (Screen, -1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_TARGETTEXTURE|
 										(vid_vsync ? SDL_RENDERER_PRESENTVSYNC : 0));
 		if (!Renderer)
@@ -669,6 +728,9 @@ void SDLFB::ResetSDLRenderer ()
 
 		SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 255);
 
+#ifdef ZD_VITA
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest scaling of the internal framebuffer
+#endif
 		Uint32 fmt;
 		switch(vid_displaybits)
 		{
@@ -679,6 +741,11 @@ void SDLFB::ResetSDLRenderer ()
 			case 15: fmt = SDL_PIXELFORMAT_ARGB1555; break;
 		}
 		Texture = SDL_CreateTexture (Renderer, fmt, SDL_TEXTUREACCESS_STREAMING, Width, Height);
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Display: streaming texture %s (%s)\n", Texture != NULL ? "created" : "failed", SDL_GetError());
+		if (Texture == NULL) return;
+		SDL_SetTextureBlendMode(Texture, SDL_BLENDMODE_NONE);
+#endif
 
 		{
 			NotPaletted = true;
@@ -705,6 +772,37 @@ void SDLFB::ResetSDLRenderer ()
 			NotPaletted = false;
 	}
 
+#ifdef ZD_VITA
+	if (Renderer != NULL)
+	{
+		// Use physical output coordinates. The Vita backend did not correctly
+		// apply SDL logical-size scaling to the default RenderCopy rectangle.
+		SDL_RenderSetLogicalSize(Renderer, 0, 0);
+		SDL_RenderSetScale(Renderer, 1.0f, 1.0f);
+		int windowWidth=0, windowHeight=0;
+		SDL_GetWindowSize(Screen, &windowWidth, &windowHeight);
+		int outputWidth=960, outputHeight=544;
+		if (SDL_GetRendererOutputSize(Renderer, &outputWidth, &outputHeight) != 0
+			|| outputWidth <= 0 || outputHeight <= 0)
+		{
+			outputWidth=960; outputHeight=544;
+		}
+		I_VitaTrace("[Vita] Display: window=%dx%d flags=%08x\n", windowWidth, windowHeight, (unsigned)SDL_GetWindowFlags(Screen));
+		SDL_Rect viewport = { 0, 0, outputWidth, outputHeight };
+		SDL_RenderSetViewport(Renderer, &viewport);
+		SDL_RenderSetClipRect(Renderer, NULL);
+		VitaDestination = viewport;
+		if (Width * outputHeight > Height * outputWidth)
+			VitaDestination.h = outputWidth * Height / Width;
+		else
+			VitaDestination.w = outputHeight * Width / Height;
+		VitaDestination.x = (outputWidth - VitaDestination.w) / 2;
+		VitaDestination.y = (outputHeight - VitaDestination.h) / 2;
+		I_VitaTrace("[Vita] Display: render=%dx%d output=%dx%d destination=%d,%d %dx%d\n",
+			Width, Height, outputWidth, outputHeight, VitaDestination.x, VitaDestination.y,
+			VitaDestination.w, VitaDestination.h);
+	}
+#else
 	// In fullscreen, set logical size according to animorphic ratio.
 	// Windowed modes are rendered to fill the window (usually 1:1)
 	if (IsFullscreen ())
@@ -714,6 +812,7 @@ void SDLFB::ResetSDLRenderer ()
 		ScaleWithAspect (w, h, Width, Height);
 		SDL_RenderSetLogicalSize (Renderer, w, h);
 	}
+#endif
 }
 
 void SDLFB::SetVSync (bool vsync)
@@ -780,3 +879,33 @@ ADD_STAT (blit)
 		BlitCycles.TimeMS(), SDLFlipCycles.TimeMS());
 	return out;
 }
+
+#ifdef ZD_VITA
+CVAR(Bool, vita_profile, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+bool I_VitaPerfEnabled() { return vita_profile; }
+static Uint64 VitaPerfTotals[VPERF_COUNT], VitaPerfWindowStart, VitaPerfMaxFrame;
+static unsigned VitaPerfFrames;
+void I_VitaPerfAdd(EVitaPerfStage stage, Uint64 start)
+{
+	if (start) VitaPerfTotals[stage] += SDL_GetPerformanceCounter() - start;
+}
+void I_VitaPerfFrame(Uint64 start)
+{
+	if (!start) return;
+	Uint64 now = SDL_GetPerformanceCounter();
+	if (!VitaPerfWindowStart) VitaPerfWindowStart = start;
+	Uint64 frame = now - start;
+	if (frame > VitaPerfMaxFrame) VitaPerfMaxFrame = frame;
+	++VitaPerfFrames;
+	double seconds = double(now - VitaPerfWindowStart) / SDL_GetPerformanceFrequency();
+	if (seconds < 5.0) return;
+	double ms = 1000.0 / SDL_GetPerformanceFrequency() / VitaPerfFrames;
+	I_VitaTrace("[Vita] Perf: %dx%d %.1f fps; game=%.2f display=%.2f render=%.2f convert=%.2f present=%.2f audio=%.2f ms/frame; max=%.2f ms\n",
+		screen->GetWidth(), screen->GetHeight(), VitaPerfFrames / seconds,
+		VitaPerfTotals[VPERF_GAME]*ms, VitaPerfTotals[VPERF_DISPLAY]*ms,
+		VitaPerfTotals[VPERF_RENDER]*ms, VitaPerfTotals[VPERF_CONVERT]*ms, VitaPerfTotals[VPERF_PRESENT]*ms,
+		VitaPerfTotals[VPERF_AUDIO]*ms, VitaPerfMaxFrame*1000.0/SDL_GetPerformanceFrequency());
+	memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
+	VitaPerfFrames = 0; VitaPerfMaxFrame = 0; VitaPerfWindowStart = now;
+}
+#endif

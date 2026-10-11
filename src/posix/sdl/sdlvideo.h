@@ -7,7 +7,13 @@ class SDLVideo : public IVideo
 	SDLVideo (int parm);
 	~SDLVideo ();
 
-	EDisplayType GetDisplayType () { return DISPLAY_Both; }
+	EDisplayType GetDisplayType () {
+#ifdef ZD_VITA
+		return DISPLAY_FullscreenOnly;
+#else
+		return DISPLAY_Both;
+#endif
+	}
 	void SetWindowedScale (float scale);
 
 	DFrameBuffer *CreateFrameBuffer (int width, int height, bool fs, DFrameBuffer *old);

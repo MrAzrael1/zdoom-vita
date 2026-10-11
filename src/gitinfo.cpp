@@ -54,6 +54,9 @@ const char *GetGitTime()
 
 const char *GetVersionString()
 {
+#ifdef ZD_VITA
+	return VERSIONSTR;
+#endif
 	if (GetGitDescription()[0] == '\0')
 	{
 		return VERSIONSTR;

@@ -44,6 +44,9 @@ void M_ScreenShot (const char *filename);
 void M_LoadDefaults ();
 
 bool M_SaveDefaults (const char *filename);
+#ifdef ZD_VITA
+void M_VitaSaveConfig(bool force);
+#endif
 void M_SaveCustomKeys (FConfigFile *config, char *section, char *subsection, size_t sublen);
 
 

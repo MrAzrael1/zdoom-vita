@@ -1,8 +1,10 @@
+#include "posix/vita_debug.h"
 #include <SDL.h>
 
 #include "doomdef.h"
 #include "templates.h"
 #include "m_joy.h"
+#include "gameconfigfile.h"
 
 // Very small deadzone so that floating point magic doesn't happen
 #define MIN_DEADZONE 0.000001f
@@ -17,13 +19,17 @@ public:
 		{
 			NumAxes = SDL_JoystickNumAxes(Device);
 			NumHats = SDL_JoystickNumHats(Device);
+#ifdef ZD_VITA
+			I_VitaTrace("[Vita] Controller: %s; axes=%d buttons=%d hats=%d\n",
+				SDL_JoystickName(Device), NumAxes, SDL_JoystickNumButtons(Device), NumHats);
+#endif
 
 			SetDefaultConfig();
 		}
 	}
 	~SDLInputJoystick()
 	{
-		if(Device != NULL)
+		if(Device != NULL && GameConfig != NULL)
 			M_SaveJoystickConfig(this);
 		SDL_JoystickClose(Device);
 	}
@@ -87,7 +93,11 @@ public:
 	}
 	bool IsAxisDeadZoneDefault(int axis)
 	{
+#ifdef ZD_VITA
+		return Axes[axis].DeadZone == 0.18f;
+#else
 		return Axes[axis].DeadZone <= MIN_DEADZONE;
+#endif
 	}
 	bool IsAxisMapDefault(int axis)
 	{
@@ -102,6 +112,9 @@ public:
 
 	void SetDefaultConfig()
 	{
+		// Configuration reloads must replace, rather than append, axis entries.
+		Axes.Clear();
+		Multiplier = 1.0f;
 		for(int i = 0;i < GetNumAxes();i++)
 		{
 			AxisInfo info;
@@ -109,7 +122,11 @@ public:
 				info.Name.Format("Axis %d", i+1);
 			else
 				info.Name.Format("Hat %d (%c)", (i-NumAxes)/2 + 1, (i-NumAxes)%2 == 0 ? 'x' : 'y');
+#ifdef ZD_VITA
+			info.DeadZone = 0.18f;
+#else
 			info.DeadZone = MIN_DEADZONE;
+#endif
 			info.Multiplier = 1.0f;
 			info.Value = 0.0;
 			info.ButtonValue = 0;
@@ -160,7 +177,12 @@ public:
 		if(NumAxes > 1)
 		{
 			buttonstate = Joy_XYAxesToButtons(Axes[0].Value, Axes[1].Value);
+#ifdef ZD_VITA
+			static const int stickKeys[] = {KEY_PAD_LTHUMB_RIGHT, KEY_PAD_LTHUMB_LEFT, KEY_PAD_LTHUMB_DOWN, KEY_PAD_LTHUMB_UP};
+			Joy_GenerateButtonEvents(Axes[0].ButtonValue, buttonstate, 4, stickKeys);
+#else
 			Joy_GenerateButtonEvents(Axes[0].ButtonValue, buttonstate, 4, KEY_JOYAXIS1PLUS);
+#endif
 			Axes[0].ButtonValue = buttonstate;
 		}
 
@@ -218,7 +240,11 @@ protected:
 	int					NumAxes;
 	int					NumHats;
 };
+#ifdef ZD_VITA
+const EJoyAxis SDLInputJoystick::DefaultAxes[5] = {JOYAXIS_Side, JOYAXIS_Forward, JOYAXIS_Yaw, JOYAXIS_Pitch, JOYAXIS_None};
+#else
 const EJoyAxis SDLInputJoystick::DefaultAxes[5] = {JOYAXIS_Side, JOYAXIS_Forward, JOYAXIS_Pitch, JOYAXIS_Yaw, JOYAXIS_Up};
+#endif
 
 class SDLInputJoystickManager
 {
@@ -274,6 +300,7 @@ void I_ShutdownJoysticks()
 	if(JoystickManager)
 	{
 		delete JoystickManager;
+		JoystickManager = NULL;
 		SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
 	}
 }
@@ -282,7 +309,7 @@ void I_GetJoysticks(TArray<IJoystickConfig *> &sticks)
 {
 	sticks.Clear();
 
-	JoystickManager->GetDevices(sticks);
+	if (JoystickManager != NULL) JoystickManager->GetDevices(sticks);
 }
 
 void I_GetAxes(float axes[NUM_JOYAXIS])
@@ -291,7 +318,7 @@ void I_GetAxes(float axes[NUM_JOYAXIS])
 	{
 		axes[i] = 0;
 	}
-	if (use_joystick)
+	if (use_joystick && JoystickManager != NULL)
 	{
 		JoystickManager->AddAxes(axes);
 	}
@@ -299,7 +326,7 @@ void I_GetAxes(float axes[NUM_JOYAXIS])
 
 void I_ProcessJoysticks()
 {
-	if (use_joystick)
+	if (use_joystick && JoystickManager != NULL)
 		JoystickManager->ProcessInput();
 }
 

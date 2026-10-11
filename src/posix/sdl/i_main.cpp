@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 /*
 ** i_main.cpp
 ** System-specific startup code. Eventually calls D_DoomMain.
@@ -44,11 +45,18 @@
 #include <gtk/gtk.h>
 #endif
 #include <locale.h>
+#ifdef ZD_VITA
+#include <psp2/io/fcntl.h>
+#include <psp2/io/stat.h>
+#endif
 #if defined(__MACH__) && !defined(NOASM)
 #include <sys/types.h>
 #include <sys/mman.h>
 #endif
 
+#ifdef ZD_VITA
+#include "../vita_launcher.h"
+#endif
 #include "doomerrors.h"
 #include "m_argv.h"
 #include "d_main.h"
@@ -73,7 +81,9 @@
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
 
+#ifndef NO_CRASHCATCHER
 extern "C" int cc_install_handlers(int, char**, int, int*, const char*, int(*)(char*, char*));
+#endif
 
 #ifdef __APPLE__
 void Mac_I_FatalError(const char* errortext);
@@ -237,17 +247,44 @@ void I_ShutdownJoysticks();
 
 int main (int argc, char **argv)
 {
-#if !defined (__APPLE__)
+#ifdef ZD_VITA
+	// LiveArea launches need not provide a desktop-style command line.
+	sceIoMkdir("ux0:data", 0777);
+	sceIoMkdir("ux0:data/zdoom-vita", 0777);
+	SceUID trace = sceIoOpen("ux0:data/zdoom-vita/boot-trace.log",
+		SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+	if (trace >= 0) sceIoClose(trace);
+	I_VitaTrace("VITA-BUILD-v0.10.0: native trace started\n");
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+	FILE *log = freopen("ux0:data/zdoom-vita/startup.log", "w", stdout);
+	if (log != NULL) setvbuf(stdout, NULL, _IONBF, 0);
+	FILE *errors = freopen("ux0:data/zdoom-vita/startup-errors.log", "w", stderr);
+	if (errors != NULL) setvbuf(stderr, NULL, _IONBF, 0);
+	I_VitaTrace("[Vita] Entered main; argc=%d\n", argc);
+	char programName[] = "app0:/eboot.bin";
+	char *fallbackArgs[] = { programName, NULL };
+	if (argc < 1 || argv == NULL || argv[0] == NULL)
+	{
+		argc = 1;
+		argv = fallbackArgs;
+	}
+	setenv("HOME", "ux0:data/zdoom-vita", 1);
+	if (chdir("ux0:data/zdoom-vita") != 0)
+		fprintf(stderr, "[Vita] Cannot change to data directory\n");
+#endif
+#if !defined (__APPLE__) && !defined (NO_CRASHCATCHER)
 	{
 		int s[4] = { SIGSEGV, SIGILL, SIGFPE, SIGBUS };
 		cc_install_handlers(argc, argv, 4, s, GAMENAMELOWERCASE "-crash.log", DoomSpecificInfo);
 	}
-#endif // !__APPLE__
+#endif // !__APPLE__ && !NO_CRASHCATCHER
 
 	printf(GAMENAME" %s - %s - SDL version\nCompiled on %s\n",
 		GetVersionString(), GetGitTime(), __DATE__);
 
+#ifndef ZD_VITA
 	seteuid (getuid ());
+#endif
     std::set_new_handler (NewFailure);
 
 #if defined(__MACH__) && !defined(NOASM)
@@ -265,6 +302,9 @@ int main (int argc, char **argv)
 	
 	setlocale (LC_ALL, "C");
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Initializing SDL\n");
+#endif
 	if (SDL_Init (0) < 0)
 	{
 		fprintf (stderr, "Could not initialize SDL:\n%s\n", SDL_GetError());
@@ -277,6 +317,16 @@ int main (int argc, char **argv)
     try
     {
 		Args = new DArgs(argc, argv);
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] SDL initialized; preparing engine arguments\n");
+		if (!Args->CheckParm("-iwad") && !I_VitaLauncher(Args))
+		{
+			I_VitaTrace("[Vita] Launcher closed without starting engine\n");
+			call_terms();
+			return 0;
+		}
+		// V_Init uses the archived scaling preset; explicit launch sizes still win.
+#endif
 
 		/*
 		  killough 1/98:
@@ -297,6 +347,10 @@ int main (int argc, char **argv)
 		atexit (call_terms);
 		atterm (I_Quit);
 
+#ifdef ZD_VITA
+		progdir = "app0:/";
+		I_VitaTrace("[Vita] Resources: app0:/; IWAD: %s\n", Args->CheckValue("-iwad"));
+#else
 		// Should we even be doing anything with progdir on Unix systems?
 		char program[PATH_MAX];
 		if (realpath (argv[0], program) == NULL)
@@ -312,12 +366,22 @@ int main (int argc, char **argv)
 			progdir = "./";
 		}
 
+#endif
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Initializing input\n");
+#endif
 		I_StartupJoysticks();
 		C_InitConsole (80*8, 25*8, false);
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Entering D_DoomMain\n");
+#endif
 		D_DoomMain ();
     }
     catch (class CDoomError &error)
     {
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Engine error: %s\n", error.GetMessage() ? error.GetMessage() : "unknown");
+#endif
 		I_ShutdownJoysticks();
 		if (error.GetMessage ())
 			fprintf (stderr, "%s\n", error.GetMessage ());

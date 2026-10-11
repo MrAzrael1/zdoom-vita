@@ -37,7 +37,9 @@
 #include <windows.h>
 #define USE_WINDOWS_DWORD
 #else
+#ifndef NO_OPENAL
 #include <dlfcn.h>
+#endif
 #endif
 
 #include "except.h"

@@ -349,6 +349,10 @@ OptionMenu "OptionsMenu"
 	SafeCommand "Reset to defaults",	"reset2defaults"
 	SafeCommand	"Reset to last saved",	"reset2saved"
 	Command "Go to console",			"menuconsole"
+	IfOption(Vita)
+	{
+		Submenu "Vita Settings", "VitaSettings"
+	}
 }
 
 //-------------------------------------------------------------------------------------------
@@ -1750,4 +1754,24 @@ OptionValue ExtraTicMode
 	0, "None"
 	1, "1"
 	2, "All unacknowledged"
+}
+
+// Vita rendering presets. The submenu link is visible only on Vita.
+OptionValue "VitaRenderSizes"
+{
+	0, "480x272 (2.00x)"
+	1, "600x340 (1.60x)"
+	2, "720x408 (1.33x)"
+	3, "960x544 (1.00x)"
+}
+
+OptionMenu "VitaSettings"
+{
+	Title "VITA SETTINGS"
+	Option "Render size", "vita_scaling", "VitaRenderSizes"
+	StaticText "Higher resolutions will reduce FPS."
+	StaticText " "
+	Option "Show FPS", "vid_fps", "OnOff"
+	StaticText " "
+	Option "Rear Touchpad Weapon Switch", "vita_rearweapons", "OnOff"
 }

@@ -654,7 +654,38 @@ void C_BindDefaults ()
 			dest->SetBind(key, sc.String);
 		}
 	}
+#ifdef ZD_VITA
+	Bindings.SetBind(KEY_PAD_A, "+use");
+	Bindings.SetBind(KEY_PAD_B, "+altattack");
+	Bindings.SetBind(KEY_PAD_X, "+jump");
+	Bindings.SetBind(KEY_PAD_Y, "weapnext");
+	Bindings.SetBind(KEY_PAD_LSHOULDER, "weapprev");
+	Bindings.SetBind(KEY_PAD_RSHOULDER, "+attack");
+	Bindings.SetBind(KEY_PAD_BACK, "togglemap");
+	Bindings.SetBind(KEY_PAD_DPAD_UP, "invuse");
+	Bindings.SetBind(KEY_PAD_DPAD_DOWN, "centerview");
+	Bindings.SetBind(KEY_PAD_DPAD_LEFT, "invprev");
+	Bindings.SetBind(KEY_PAD_DPAD_RIGHT, "invnext");
+	// Inventory defaults must not inherit a second action from DEFBINDS.
+	DoubleBindings.SetBind(KEY_PAD_DPAD_LEFT, "");
+	DoubleBindings.SetBind(KEY_PAD_DPAD_RIGHT, "");
+	DoubleBindings.SetBind(KEY_PAD_DPAD_UP, "");
+	AutomapBindings.SetBind(KEY_PAD_BACK, "togglemap");
+#endif
 }
+
+#ifdef ZD_VITA
+CCMD(vita_inventory_defaults)
+{
+	Bindings.SetBind(KEY_PAD_DPAD_LEFT, "invprev");
+	Bindings.SetBind(KEY_PAD_DPAD_RIGHT, "invnext");
+	Bindings.SetBind(KEY_PAD_DPAD_UP, "invuse");
+	DoubleBindings.SetBind(KEY_PAD_DPAD_LEFT, "");
+	DoubleBindings.SetBind(KEY_PAD_DPAD_RIGHT, "");
+	DoubleBindings.SetBind(KEY_PAD_DPAD_UP, "");
+	Printf("Vita D-pad inventory bindings restored.\n");
+}
+#endif
 
 CCMD(binddefaults)
 {

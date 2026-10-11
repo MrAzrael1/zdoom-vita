@@ -1,6 +1,20 @@
 cmake_minimum_required( VERSION 2.4 )
 project(ZDoom)
 
+if( CMAKE_C_COMPILER MATCHES "arm-vita-eabi" AND DEFINED VITASDK AND EXISTS "${VITASDK}/share/vita.cmake" )
+	set( VITA TRUE )
+endif()
+
+if( VITA )
+	if( NOT CMAKE_C_FLAGS MATCHES "-std=" )
+		set( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu17" )
+	endif()
+	if( NOT CMAKE_CXX_FLAGS MATCHES "-std=" )
+		set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11" )
+	endif()
+	include( "${VITASDK}/share/vita.cmake" )
+endif( VITA )
+
 if( COMMAND cmake_policy )
 	if( POLICY CMP0011 )
 		cmake_policy( SET CMP0011 NEW )
@@ -106,6 +120,10 @@ endif( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}")
 
+if( VITA )
+	set( NO_FMOD ON CACHE BOOL "Disable FMODEx sound support" )
+	set( NO_OPENAL ON CACHE BOOL "Disable OpenAL sound support" )
+endif( VITA )
 option( NO_FMOD "Disable FMODEx sound support" OFF )
 option( NO_OPENAL "Disable OpenAL sound support" OFF )
 
@@ -251,6 +269,48 @@ add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
 add_subdirectory( src )
+
+if( VITA )
+	set( ZDOOM_VITA_TITLE_ID "ZDVZ00001" CACHE STRING "Vita application title ID" )
+	set( ZDOOM_VITA_VERSION "00.10" CACHE STRING "Vita application version" )
+	# Local testing only. Leave empty for distribution builds.
+	set( ZDOOM_VITA_TEST_SOUNDFONT "" CACHE FILEPATH "Optional test SF2 packaged in the VPK" )
+	set( ZDOOM_VITA_DOOM_FONT ON CACHE BOOL "Use experimental Doom launcher font" )
+    set( ZDOOM_VITA_BUNDLED_IWAD_DIR "" CACHE PATH "Folder containing DOOM1.WAD, freedoom1.wad, freedoom2.wad" )
+    set( VITA_MUSIC_FILES )
+    if( ZDOOM_VITA_BUNDLED_IWAD_DIR )
+        foreach( IWAD DOOM1.WAD freedoom1.wad freedoom2.wad )
+            if( NOT EXISTS "${ZDOOM_VITA_BUNDLED_IWAD_DIR}/${IWAD}" )
+                message( FATAL_ERROR "Missing bundled IWAD: ${IWAD}" )
+            endif()
+            list( APPEND VITA_MUSIC_FILES FILE "${ZDOOM_VITA_BUNDLED_IWAD_DIR}/${IWAD}" "iwad/${IWAD}" )
+        endforeach()
+    endif()
+    if( ZDOOM_VITA_DOOM_FONT )
+        list( APPEND VITA_MUSIC_FILES FILE "${CMAKE_SOURCE_DIR}/zdoom-vita-launcher-font.bin" launcher-font.bin )
+    endif()
+	if( ZDOOM_VITA_TEST_SOUNDFONT )
+		if( NOT EXISTS "${ZDOOM_VITA_TEST_SOUNDFONT}" )
+			message( FATAL_ERROR "Test SoundFont does not exist: ${ZDOOM_VITA_TEST_SOUNDFONT}" )
+		endif()
+		file( WRITE "${CMAKE_BINARY_DIR}/vita-timidity.cfg" "soundfont app0:/gm.sf2\n" )
+		list( APPEND VITA_MUSIC_FILES
+			FILE "${ZDOOM_VITA_TEST_SOUNDFONT}" gm.sf2
+			FILE "${CMAKE_BINARY_DIR}/vita-timidity.cfg" vita-timidity.cfg )
+	endif()
+	vita_create_self( zdoom.self zdoom )
+	vita_create_vpk( zdoom.vpk "${ZDOOM_VITA_TITLE_ID}" zdoom.self
+		VERSION "${ZDOOM_VITA_VERSION}"
+		NAME "ZDoom Vita"
+		FILE "${CMAKE_SOURCE_DIR}/zdoom-vita-icon0.png" sce_sys/icon0.png
+		FILE "${CMAKE_SOURCE_DIR}/README.txt" README.txt
+		FILE "${ZDOOM_OUTPUT_DIR}/zdoom.pk3" zdoom.pk3 ${VITA_MUSIC_FILES} )
+	if( CMAKE_VERSION VERSION_LESS "3.20.0" )
+		add_dependencies( zdoom.vpk pk3 )
+	else( CMAKE_VERSION VERSION_LESS "3.20.0" )
+		add_dependencies( zdoom.vpk-vpk pk3 )
+	endif( CMAKE_VERSION VERSION_LESS "3.20.0" )
+endif( VITA )
 
 if( NOT WIN32 AND NOT APPLE )
 	add_subdirectory( output_sdl )

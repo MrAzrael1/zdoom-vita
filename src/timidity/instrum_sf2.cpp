@@ -1438,7 +1438,9 @@ void SFFile::ApplyGeneratorsToRegion(SFGenComposite *gen, SFSample *sfsamp, Rend
 	{
 		sp->scale_note = sfsamp->OriginalPitch;
 	}
-	sp->root_freq = note_to_freq(sp->scale_note);
+	// Sample correction adjusts playback rate independently of key scaling.
+	// Its sign is inverse to the sample's nominal root pitch.
+	sp->root_freq = note_to_freq(sp->scale_note - sfsamp->PitchCorrection * 0.01);
 	sp->sample_rate = sfsamp->SampleRate;
 	sp->key_group = gen->exclusiveClass;
 

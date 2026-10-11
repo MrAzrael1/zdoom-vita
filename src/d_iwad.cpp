@@ -48,10 +48,17 @@
 #include "gameconfigfile.h"
 #include "resourcefiles/resourcefile.h"
 #include "version.h"
+#ifdef ZD_VITA
+#include "posix/vita_launcher.h"
+#endif
 
 
 CVAR (Bool, queryiwad, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+#ifdef ZD_VITA
+CVAR (String, defaultiwad, "doom2", CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+#else
 CVAR (String, defaultiwad, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+#endif
 
 //==========================================================================
 //
@@ -580,6 +587,11 @@ int FIWadManager::IdentifyVersion (TArray<FString> &wadfiles, const char *iwad, 
 			path = FString (wads[pickwad].Path.GetChars(), lastslash + 1);
 		}
 		path += mIWads[wads[pickwad].Type].Load[i];
+#ifdef ZD_VITA
+        std::string companion = I_VitaCompanionFile(wads[pickwad].Path.GetChars(),
+            mIWads[wads[pickwad].Type].Load[i].GetChars());
+        if (!companion.empty()) path = companion.c_str();
+#endif
 		D_AddFile (wadfiles, path);
 
 	}

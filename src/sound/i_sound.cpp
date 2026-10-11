@@ -82,7 +82,11 @@ CVAR (Int, snd_samplerate, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (Int, snd_buffersize, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (String, snd_output, "default", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
-#ifndef NO_FMOD
+#ifdef ZD_VITA
+SoundRenderer *CreateSDLSoundRenderer();
+EXTERN_CVAR(Int, snd_mididevice)
+#define DEF_BACKEND "sdl"
+#elif !defined(NO_FMOD)
 #define DEF_BACKEND "fmod"
 #elif !defined(NO_OPENAL)
 #define DEF_BACKEND "openal"
@@ -267,6 +271,16 @@ void I_InitSound ()
 	}
 
 	// This has been extended to allow falling back from FMod to OpenAL and vice versa if the currently active sound system cannot be found.
+#ifdef ZD_VITA
+	// Migrate the silent boot builds' saved backend to SDL audio.
+	if (stricmp(snd_backend, "sdl") == 0 || stricmp(snd_backend, "null") == 0)
+	{
+		GSnd = CreateSDLSoundRenderer();
+		snd_backend = "sdl";
+		if (snd_mididevice == -1) snd_mididevice = -3;
+	}
+	else
+#endif
 	if (stricmp(snd_backend, "null") == 0)
 	{
 		GSnd = new NullSoundRenderer;

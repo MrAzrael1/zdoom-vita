@@ -45,9 +45,10 @@
 #	include <errno.h>
 #	include <unistd.h>
 #	include <netdb.h>
+	#if defined(__sun) || defined(ZD_VITA)
+	#	include <fcntl.h>
+	#else
 #	include <sys/ioctl.h>
-#	ifdef __sun
-#		include <fcntl.h>
 #	endif
 #endif
 
@@ -443,7 +444,7 @@ void StartNetwork (bool autoPort)
 	// create communication socket
 	mysocket = UDPsocket ();
 	BindToLocalPort (mysocket, autoPort ? 0 : DOOMPORT);
-#ifndef __sun
+#if !defined(__sun) && !defined(ZD_VITA)
 	ioctlsocket (mysocket, FIONBIO, &trueval);
 #else
 	fcntl(mysocket, F_SETFL, trueval | O_NONBLOCK);

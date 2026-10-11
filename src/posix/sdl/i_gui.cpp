@@ -1,3 +1,5 @@
+#include "posix/vita_input.h"
+#include "v_video.h"
 
 // Moved from sdl/i_system.cpp
 
@@ -9,8 +11,21 @@
 #include "v_palette.h"
 #include "textures.h"
 
+#ifdef ZD_VITA
+static FTexture *VitaCursorTexture;
+void I_VitaDrawTouchCursor()
+{
+	int x,y;
+	if (!VitaCursorTexture || !screen || !I_VitaTouchPointer(x,y)) return;
+	int size=screen->GetWidth()*24/960;
+	screen->DrawTexture(VitaCursorTexture,x,y,DTA_DestWidth,size,DTA_DestHeight,size,TAG_DONE);
+}
+#endif
 bool I_SetCursor(FTexture *cursorpic)
 {
+#ifdef ZD_VITA
+	VitaCursorTexture=(cursorpic && cursorpic->UseType != FTexture::TEX_Null) ? cursorpic : TexMan["cursor"];
+#endif
 	static SDL_Cursor *cursor;
 	static SDL_Surface *cursorSurface;
 

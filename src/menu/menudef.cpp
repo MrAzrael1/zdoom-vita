@@ -171,6 +171,12 @@ static bool CheckSkipOptionBlock(FScanner &sc)
 				filter = true;
 			#endif
 		}
+		else if (sc.Compare("Vita"))
+		{
+#ifdef ZD_VITA
+			filter = true;
+#endif
+		}
 		else if (sc.Compare("unix"))
 		{
 			#ifdef __unix__

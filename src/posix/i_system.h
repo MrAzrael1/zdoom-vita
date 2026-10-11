@@ -158,6 +158,7 @@ int I_FindAttr (findstate_t *fileinfo);
 #define FA_DIREC	8
 #define FA_ARCH		16
 
+#ifdef NEED_STRLWR
 static inline char *strlwr(char *str)
 {
 	char *ptr = str;
@@ -168,5 +169,6 @@ static inline char *strlwr(char *str)
 	}
 	return str;
 }
+#endif
 
 #endif

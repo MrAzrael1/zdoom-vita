@@ -1,3 +1,7 @@
+#include "posix/vita_debug.h"
+#ifdef ZD_VITA
+#include <sys/stat.h>
+#endif
 /*
 ** configfile.cpp
 ** Implements the basic .ini parsing class
@@ -601,7 +605,13 @@ FConfigFile::FConfigEntry *FConfigFile::NewConfigEntry (
 
 void FConfigFile::LoadConfigFile ()
 {
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: opening %s\n", PathName.GetChars());
+#endif
 	FILE *file = fopen (PathName, "r");
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: fopen %s\n", file != NULL ? "succeeded" : "failed (defaults will be used)");
+#endif
 	bool succ;
 
 	FileExisted = false;
@@ -610,7 +620,14 @@ void FConfigFile::LoadConfigFile ()
 		return;
 	}
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: parsing existing file\n");
+#endif
 	succ = ReadConfig (file);
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config: parse returned\n");
+#endif
+
 	fclose (file);
 	FileExisted = succ;
 }
@@ -770,6 +787,30 @@ bool FConfigFile::WriteConfigFile () const
 		return true;
 	}
 
+#ifdef ZD_VITA
+	// Archive checks run periodically, but unchanged settings need no flash write.
+	static unsigned long long lastHash;
+	static bool haveHash;
+	unsigned long long hash=14695981039346656037ULL;
+	auto hashText = [&hash](const char *text) {
+		for (const unsigned char *p=(const unsigned char*)text; *p; ++p)
+			{ hash ^= *p; hash *= 1099511628211ULL; }
+		hash ^= 0; hash *= 1099511628211ULL;
+	};
+	hashText(PathName.GetChars());
+	for (FConfigSection *s=Sections; s; s=s->Next)
+	{
+		hashText(s->SectionName.GetChars()); hashText(s->Note.GetChars());
+		for (FConfigEntry *e=s->RootEntry; e; e=e->Next)
+		{
+			hashText(e->Key); hashText(e->Value);
+		}
+	}
+	struct stat savedFile;
+	if (haveHash && hash==lastHash && stat(PathName.GetChars(),&savedFile)==0 && savedFile.st_size>0)
+		return true;
+#endif
+
 	FILE *file = fopen (PathName, "w");
 	FConfigSection *section;
 	FConfigEntry *entry;
@@ -805,8 +846,13 @@ bool FConfigFile::WriteConfigFile () const
 		section = section->Next;
 		fputs ("\n", file);
 	}
-	fclose (file);
-	return true;
+	bool success = !ferror(file);
+	if (fflush(file) != 0) success = false;
+	if (fclose(file) != 0) success = false;
+#ifdef ZD_VITA
+	if (success) { lastHash=hash; haveHash=true; }
+#endif
+	return success;
 }
 
 //====================================================================

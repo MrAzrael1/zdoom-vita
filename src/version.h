@@ -41,7 +41,11 @@ const char *GetVersionString();
 
 /** Lots of different version numbers **/
 
+#ifdef ZD_VITA
+#define VERSIONSTR "2.8.1V"
+#else
 #define VERSIONSTR "2.8.1"
+#endif
 
 // The version as seen in the Windows resource
 #define RC_FILEVERSION 2,8,1,0

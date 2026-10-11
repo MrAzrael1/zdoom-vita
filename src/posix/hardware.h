@@ -49,6 +49,19 @@ typedef semaphore_t Semaphore;
 	semaphore_signal(sem);
 #define SEMAPHORE_INIT(sem, shared, value) \
 	semaphore_create(mach_task_self(), &sem, shared, value);
+#elif defined(ZD_VITA)
+#include <SDL.h>
+typedef SDL_sem *Semaphore;
+#define SEMAPHORE_WAIT(sem) \
+	do { \
+		while (SDL_SemWait(sem) != 0) {} \
+		if (SDL_SemValue(sem) < 1) \
+			break; \
+	} while (true);
+#define SEMAPHORE_SIGNAL(sem) \
+	SDL_SemPost(sem);
+#define SEMAPHORE_INIT(sem, shared, value) \
+	sem = SDL_CreateSemaphore(value);
 #else
 #include <semaphore.h>
 typedef sem_t Semaphore;
@@ -88,7 +101,11 @@ void I_InitGraphics ();
 void I_ShutdownGraphics ();
 void I_CreateRenderer();
 
+#ifdef ZD_VITA
+void I_WaitForFPSLimit();
+#else
 extern Semaphore FPSLimitSemaphore;
+#endif
 void I_SetFPSLimit(int limit);
 
 extern IVideo *Video;

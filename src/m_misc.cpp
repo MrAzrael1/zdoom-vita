@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 // Emacs style mode select	 -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -376,12 +377,29 @@ bool M_SaveDefaults (const char *filename)
 		GameConfig->ArchiveGameData (gameinfo.ConfigName);
 	}
 	success = GameConfig->WriteConfigFile ();
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Config save: %s path=%s errno=%d\n", success ? "OK" : "FAILED", GameConfig->GetPathName(), success ? 0 : errno);
+#endif
 	if (filename != NULL)
 	{
 		GameConfig->ChangePathName (filename);
 	}
 	return success;
 }
+
+
+#ifdef ZD_VITA
+void M_VitaSaveConfig(bool force)
+{
+	static unsigned int lastSave;
+	if (!GameConfig || gamestate == GS_STARTUP || gameinfo.ConfigName.IsEmpty()) return;
+	unsigned int now=I_MSTime();
+	if (!force && lastSave && now-lastSave < 10000) return;
+	lastSave=now;
+	if (!M_SaveDefaults(NULL))
+		Printf("Could not save Vita configuration: %s\n", strerror(errno));
+}
+#endif
 
 void M_SaveDefaultsFinal ()
 {
@@ -412,9 +430,22 @@ CCMD (writeini)
 
 void M_LoadDefaults ()
 {
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Defaults: constructing configuration\n");
+#endif
 	GameConfig = new FGameConfigFile;
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Defaults: reading global settings\n");
+#endif
 	GameConfig->DoGlobalSetup ();
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Defaults: registering save handler\n");
+#endif
 	atterm (M_SaveDefaultsFinal);
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Defaults: complete\n");
+#endif
+
 }
 
 

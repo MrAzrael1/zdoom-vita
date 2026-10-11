@@ -8,6 +8,7 @@ if( NOT CMAKE_CROSSCOMPILING )
 endif( NOT CMAKE_CROSSCOMPILING )
 
 # Lemon wants lempar.c in its directory
+if( NOT CMAKE_CROSSCOMPILING )
 if( NOT NO_GENERATOR_EXPRESSIONS )
 add_custom_command( TARGET lemon
 	POST_BUILD
@@ -18,3 +19,4 @@ add_custom_command( TARGET lemon
 	POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/lempar.c ${CMAKE_CURRENT_BINARY_DIR} )
 endif( NOT NO_GENERATOR_EXPRESSIONS )
+endif( NOT CMAKE_CROSSCOMPILING )

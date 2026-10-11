@@ -79,7 +79,12 @@ int I_WaitForTicPolled (int prevtic)
 
 	assert (TicFrozen == 0);
     while ((time = I_GetTimePolled(false)) <= prevtic)
+	{
+#ifdef ZD_VITA
+		SDL_Delay(1);
+#endif
 		;
+	}
 
     return time;
 }
@@ -149,6 +154,11 @@ void I_HandleAlarm (int sig)
 //
 void I_SelectTimer()
 {
+#ifdef ZD_VITA
+	I_GetTime = I_GetTimePolled;
+	I_FreezeTime = I_FreezeTimePolled;
+	I_WaitForTic = I_WaitForTicPolled;
+#else
 	SEMAPHORE_INIT(timerWait, 0, 0)
 #ifndef __sun
 	signal(SIGALRM, I_HandleAlarm);
@@ -175,6 +185,7 @@ void I_SelectTimer()
 		I_FreezeTime = I_FreezeTimeSignaled;
 		I_WaitForTic = I_WaitForTicSignaled;
 	}
+#endif
 }
 
 // Returns the fractional amount of a tic passed since the most recent tic

@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 /*
 ** hardware.cpp
 ** Somewhat OS-independant interface to the screen, mouse, keyboard, and stick
@@ -72,6 +73,9 @@ void I_ShutdownGraphics ()
 
 void I_InitGraphics ()
 {
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Display: initializing SDL video\n");
+#endif
 	if (SDL_InitSubSystem (SDL_INIT_VIDEO) < 0)
 	{
 		I_FatalError ("Could not initialize SDL video:\n%s\n", SDL_GetError());
@@ -85,6 +89,9 @@ void I_InitGraphics ()
 	val.Bool = !!Args->CheckParm ("-devparm");
 	ticker.SetGenericRepDefault (val, CVAR_Bool);
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Display: creating video device\n");
+#endif
 	Video = new SDLVideo (0);
 	if (Video == NULL)
 		I_FatalError ("Failed to initialize display");
@@ -204,7 +211,29 @@ void I_ClosestResolution (int *width, int *height, int bits)
 EXTERN_CVAR(Int, vid_maxfps);
 EXTERN_CVAR(Bool, cl_capfps);
 
-#ifndef __APPLE__
+#if defined(ZD_VITA)
+// A failed POSIX SIGEV_THREAD timer would leave the frame semaphore unsignaled.
+// Use SDL's monotonic millisecond clock and delay directly on Vita.
+static int VitaFPSLimit;
+static Uint32 VitaPreviousFrame;
+
+void I_SetFPSLimit(int limit)
+{
+	VitaFPSLimit = limit < 0 ? (int)vid_maxfps : limit;
+	VitaPreviousFrame = 0;
+}
+
+void I_WaitForFPSLimit()
+{
+	if (VitaFPSLimit <= 0) return;
+	Uint32 interval = 1000 / VitaFPSLimit;
+	Uint32 now = SDL_GetTicks();
+	Uint32 elapsed = now - VitaPreviousFrame;
+	if (VitaPreviousFrame != 0 && elapsed < interval)
+		SDL_Delay(interval - elapsed);
+	VitaPreviousFrame = SDL_GetTicks();
+}
+#elif !defined(__APPLE__)
 Semaphore FPSLimitSemaphore;
 
 static void FPSLimitNotify(sigval val)

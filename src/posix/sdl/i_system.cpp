@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 // Emacs style mode select	 -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -24,7 +25,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef ZD_VITA
 #include <fnmatch.h>
+#endif
 #include <unistd.h>
 
 #include <stdarg.h>
@@ -205,6 +208,9 @@ void STACK_ARGS I_FatalError (const char *error, ...)
 			fflush (Logfile);
 		}
 //		throw CFatalError (errortext);
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Fatal error: %s\n", errortext);
+#endif
 		fprintf (stderr, "%s\n", errortext);
 		exit (-1);
     }
@@ -253,6 +259,9 @@ void I_PrintStr (const char *cp)
 	}
 	*dstp=0;
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Engine] %s", copy);
+#endif
 	fputs (copy, stdout);
 	delete [] copy;
 	fflush (stdout);
@@ -437,6 +446,9 @@ int I_PickIWad_Gtk (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 
 int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 {
+#ifdef ZD_VITA
+	return defaultiwad;
+#else
 	int i;
 
 	if (!showwin)
@@ -519,6 +531,7 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 	if (scanf ("%d", &i) != 1 || i > numwads)
 		return -1;
 	return i-1;
+#endif
 }
 
 bool I_WriteIniFailed ()
@@ -536,7 +549,11 @@ static int matchfile (struct dirent *ent)
 static int matchfile (const struct dirent *ent)
 #endif
 {
+#ifdef ZD_VITA
+	return CheckWildcards (pattern, ent->d_name);
+#else
     return fnmatch (pattern, ent->d_name, FNM_NOESCAPE) == 0;
+#endif
 }
 
 void *I_FindFirst (const char *filespec, findstate_t *fileinfo)

@@ -1,3 +1,4 @@
+#include "posix/vita_debug.h"
 /*
 ** stringtable.cpp
 ** Implements the FStringTable class
@@ -115,12 +116,18 @@ void FStringTable::LoadStrings (bool enuOnly)
 	int lastlump, lump;
 	int i, j;
 
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Language load: begin\n");
+#endif
 	FreeNonDehackedStrings ();
 
 	lastlump = 0;
 
 	while ((lump = Wads.FindLump ("LANGUAGE", &lastlump)) != -1)
 	{
+#ifdef ZD_VITA
+		I_VitaTrace("[Vita] Language resource: %s\n", Wads.GetLumpFullPath(lump).GetChars());
+#endif
 		j = 0;
 		if (!enuOnly)
 		{
@@ -136,6 +143,9 @@ void FStringTable::LoadStrings (bool enuOnly)
 		// Fill in any missing strings with the default language
 		LoadLanguage (lump, MAKE_ID('*','*',0,0), true, ++j);
 	}
+#ifdef ZD_VITA
+	I_VitaTrace("[Vita] Language load: complete\n");
+#endif
 }
 
 void FStringTable::LoadLanguage (int lumpnum, DWORD code, bool exactMatch, int passnum)
@@ -149,11 +159,40 @@ void FStringTable::LoadLanguage (int lumpnum, DWORD code, bool exactMatch, int p
 	bool skip = true;
 
 	code |= orMask;
+#ifdef ZD_VITA
+	bool traceLanguage = strstr(Wads.GetLumpFullPath(lumpnum).GetChars(), "language.eng") != NULL && passnum == 1;
+	int traceDefinitions = 0;
+	if (traceLanguage)
+	{
+		I_VitaTrace("[Vita] Language: code=%08x mask=%08x sizeof(FScanner)=%u\n",
+			(unsigned)code, (unsigned)orMask, (unsigned)sizeof(FScanner));
+		I_VitaTrace("[Vita] Language: tolower(e,n,g)=%d,%d,%d\n",
+			tolower('e'), tolower('n'), tolower('g'));
+		FMemLump data = Wads.ReadLump(lumpnum);
+		FString text = data.GetString();
+		I_VitaTrace("[Vita] Language: first bytes (%u total): %.100s\n",
+			(unsigned)text.Len(), text.GetChars());
+		FScanner probe;
+		probe.OpenString("Vita language scanner self-check", "[eng]\nTEST = \"value\";\n");
+		probe.SetCMode(true);
+		int token = 0;
+		while (token < 7 && probe.GetString())
+		{
+			I_VitaTrace("[Vita] Scanner self-check %d: len=%d text=<%s>\n",
+				token++, probe.StringLen, probe.String);
+		}
+	}
+#endif
 
 	FScanner sc(lumpnum);
 	sc.SetCMode (true);
 	while (sc.GetString ())
 	{
+#ifdef ZD_VITA
+		if (traceLanguage && traceDefinitions < 4)
+			I_VitaTrace("[Vita] Language: token=<%s> len=%d line=%d inCode=%08x\n",
+				sc.String, sc.StringLen, sc.Line, (unsigned)inCode);
+#endif
 		if (sc.Compare ("["))
 		{ // Process language identifiers
 			bool donot = false;
@@ -163,6 +202,11 @@ void FStringTable::LoadLanguage (int lumpnum, DWORD code, bool exactMatch, int p
 			do
 			{
 				size_t len = sc.StringLen;
+#ifdef ZD_VITA
+				if (traceLanguage)
+					I_VitaTrace("[Vita] Language: section code token=<%s> len=%u\n",
+						sc.String, (unsigned)len);
+#endif
 				if (len != 2 && len != 3)
 				{
 					if (len == 1 && sc.String[0] == '~')
@@ -208,9 +252,20 @@ void FStringTable::LoadLanguage (int lumpnum, DWORD code, bool exactMatch, int p
 				sc.ScriptError ("You must specify a language after ~");
 			}
 			skip |= forceskip;
+#ifdef ZD_VITA
+			if (traceLanguage)
+				I_VitaTrace("[Vita] Language: section ready inCode=%08x skip=%d\n",
+					(unsigned)inCode, (int)skip);
+#endif
 		}
 		else
 		{ // Process string definitions.
+#ifdef ZD_VITA
+			++traceDefinitions;
+			if (inCode == 0)
+				I_VitaTrace("[Vita] Language failure: file=%s token=<%s> line=%d pass=%d\n",
+					sc.ScriptName.GetChars(), sc.String, sc.Line, passnum);
+#endif
 			if (inCode == 0)
 			{
 				// LANGUAGE lump is bad. We need to check if this is an old binary

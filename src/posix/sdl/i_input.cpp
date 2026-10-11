@@ -1,6 +1,14 @@
 #include <SDL.h>
+#ifdef ZD_VITA
+#include <psp2/ime_dialog.h>
+#include <psp2/sysmodule.h>
+#include "posix/vita_debug.h"
+#include "posix/vita_input.h"
+#include "posix/vita_input_helpers.h"
+#endif
 #include <ctype.h>
 #include "doomtype.h"
+#include "m_joy.h"
 #include "c_dispatch.h"
 #include "doomdef.h"
 #include "doomstat.h"
@@ -36,6 +44,140 @@ extern int WaitingForKey, chatmodeon;
 extern constate_e ConsoleState;
 
 static bool DownState[SDL_NUM_SCANCODES];
+
+#ifdef ZD_VITA
+static bool VitaKeyboardRequested, VitaKeyboardOpen;
+static Uint32 VitaKeyboardCooldown;
+static SceWChar16 VitaCommand[241];
+static SceWChar16 VitaKeyboardTitle[] = {'C','o','n','s','o','l','e',' ','c','o','m','m','a','n','d',0};
+static SceWChar16 VitaEmptyText[] = {0};
+static bool VitaTouchDown;
+static SDL_FingerID VitaTouchFinger;
+static Uint32 VitaTouchStart, VitaRearLastTap, VitaPointerTime;
+static float VitaTouchStartX, VitaTouchStartY, VitaPointerX, VitaPointerY;
+static bool VitaTouchDragged;
+CVAR(Bool, vita_touchmenus, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vita_rearweapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+bool I_VitaSystemKeyboardActive()
+{
+	return VitaKeyboardOpen || (Sint32)(VitaKeyboardCooldown - SDL_GetTicks()) > 0;
+}
+void I_VitaOpenConsoleKeyboard() { VitaKeyboardRequested = true; }
+CCMD(vita_keyboard) { I_VitaOpenConsoleKeyboard(); }
+
+static void I_VitaPollKeyboard()
+{
+	if (VitaKeyboardOpen)
+	{
+		if (sceImeDialogGetStatus() != SCE_COMMON_DIALOG_STATUS_FINISHED) return;
+		SceImeDialogResult result = {};
+		int status = sceImeDialogGetResult(&result);
+		sceImeDialogTerm();
+		VitaKeyboardOpen = false;
+		VitaKeyboardCooldown = SDL_GetTicks() + 250;
+		if (status < 0 || result.result < 0 || result.button != SCE_IME_DIALOG_BUTTON_ENTER) return;
+		if (menuactive != MENU_Off || (ConsoleState != c_down && ConsoleState != c_falling)) return;
+		int length=I_VitaConsoleTextLength(VitaCommand);
+		if (length < 0)
+		{
+			Printf("Console keyboard: please use ASCII command text (max 240 characters).\n");
+			return;
+		}
+		if (!length) return;
+		// Dispatch to the console directly: a long line must not overflow
+		// the engine's small asynchronous input-event ring.
+		event_t event = {};
+		event.type=EV_GUI_Event; event.subtype=EV_GUI_KeyDown;
+		event.data1='X'; event.data3=GKM_CTRL; C_Responder(&event);
+		event.data3=0; event.subtype=EV_GUI_Char;
+		for (int i=0;i<length;++i) { event.data1=VitaCommand[i]; C_Responder(&event); }
+		event.subtype=EV_GUI_KeyDown; event.data1=GK_RETURN; C_Responder(&event);
+		I_VitaTrace("[Vita] Console keyboard: submitted %d characters\n", length);
+	}
+	if (!VitaKeyboardRequested || I_VitaSystemKeyboardActive()) return;
+	VitaKeyboardRequested=false;
+	if (menuactive != MENU_Off || (ConsoleState != c_down && ConsoleState != c_falling)) return;
+	if (sceSysmoduleIsLoaded(SCE_SYSMODULE_IME) < 0 && sceSysmoduleLoadModule(SCE_SYSMODULE_IME) < 0)
+	{
+		Printf("Could not load the Vita keyboard module.\n"); return;
+	}
+	SDL_StopTextInput(); // The native dialog is owned by this adapter.
+	memset(VitaCommand,0,sizeof(VitaCommand));
+	SceImeDialogParam param;
+	sceImeDialogParamInit(&param);
+	param.type=SCE_IME_TYPE_DEFAULT;
+	param.option=SCE_IME_OPTION_NO_ASSISTANCE;
+	param.dialogMode=SCE_IME_DIALOG_DIALOG_MODE_WITH_CANCEL;
+	param.textBoxMode=SCE_IME_DIALOG_TEXTBOX_MODE_WITH_CLEAR;
+	param.title=VitaKeyboardTitle; param.initialText=VitaEmptyText;
+	param.inputTextBuffer=VitaCommand; param.maxTextLength=240;
+	int error=sceImeDialogInit(&param);
+	if (error < 0) { Printf("Vita keyboard init failed: %08x\n", (unsigned)error); return; }
+	VitaKeyboardOpen=true;
+	VitaTouchDown=false;
+	I_VitaTrace("[Vita] Console keyboard: opened\n");
+}
+
+static void I_VitaTouchEvent(const SDL_TouchFingerEvent &touch, Uint32 type)
+{
+	if (!screen) return;
+	if (touch.touchId == 2)
+	{
+		if (vita_rearweapons && type == SDL_FINGERDOWN && menuactive == MENU_Off && ConsoleState == c_up &&
+			gamestate == GS_LEVEL && !paused && !demoplayback &&
+			(Sint32)(SDL_GetTicks() - VitaRearLastTap) >= 200)
+		{
+			char command[9];
+			strcpy(command,touch.x >= .5f ? "weapnext" : "weapprev");
+			AddCommandString(command);
+			VitaRearLastTap = SDL_GetTicks();
+		}
+		return;
+	}
+	if (touch.touchId != 1 || !vita_touchmenus) return;
+	if (type==SDL_FINGERDOWN && menuactive==MENU_Off &&
+		(ConsoleState==c_down || ConsoleState==c_falling))
+	{
+		I_VitaOpenConsoleKeyboard(); return;
+	}
+	if (menuactive != MENU_On && menuactive != MENU_OnNoPause) { VitaTouchDown=false; return; }
+	if (type==SDL_FINGERDOWN)
+	{
+		if (VitaTouchDown) return;
+		VitaTouchDown=true; VitaTouchFinger=touch.fingerId;
+		VitaTouchStart=SDL_GetTicks(); VitaTouchStartX=touch.x; VitaTouchStartY=touch.y;
+		VitaTouchDragged=false;
+	}
+	else if (!VitaTouchDown || VitaTouchFinger!=touch.fingerId) return;
+	if (std::fabs(touch.x-VitaTouchStartX)*960 > 12 ||
+		std::fabs(touch.y-VitaTouchStartY)*544 > 12) VitaTouchDragged=true;
+	VitaPointerX=touch.x; VitaPointerY=touch.y; VitaPointerTime=SDL_GetTicks();
+	event_t event = {};
+	event.data1=I_VitaTouchPixel(touch.x,960); event.data2=I_VitaTouchPixel(touch.y,544);
+	screen->ScaleCoordsFromWindow(event.data1,event.data2);
+	event.type=EV_GUI_Event; event.subtype=EV_GUI_MouseMove;
+	D_PostEvent(&event);
+	// Hover while held; only a short stationary tap becomes a click.
+	if (type==SDL_FINGERUP)
+	{
+		if (!VitaTouchDragged && SDL_GetTicks()-VitaTouchStart < 300)
+		{
+			event.subtype=EV_GUI_LButtonDown; D_PostEvent(&event);
+			event.subtype=EV_GUI_LButtonUp; D_PostEvent(&event);
+		}
+		VitaTouchDown=false;
+	}
+}
+bool I_VitaTouchPointer(int &x, int &y)
+{
+	if (!vita_touchmenus || !VitaPointerTime || SDL_GetTicks()-VitaPointerTime > 2000) return false;
+	x=I_VitaTouchPixel(VitaPointerX,screen->GetWidth());
+	y=I_VitaTouchPixel(VitaPointerY,screen->GetHeight());
+	return true;
+}
+#endif
+
 
 static const SDL_Keycode DIKToKeySym[256] =
 {
@@ -261,6 +403,9 @@ static void I_CheckNativeMouse ()
 
 void MessagePump (const SDL_Event &sev)
 {
+#ifdef ZD_VITA
+	if (I_VitaSystemKeyboardActive() && sev.type != SDL_QUIT && sev.type != SDL_WINDOWEVENT) return;
+#endif
 	static int lastx = 0, lasty = 0;
 	int x, y;
 	event_t event = { 0,0,0,0,0,0,0 };
@@ -280,6 +425,13 @@ void MessagePump (const SDL_Event &sev)
 		}
 		break;
 
+#ifdef ZD_VITA
+	case SDL_FINGERDOWN:
+	case SDL_FINGERUP:
+	case SDL_FINGERMOTION:
+		I_VitaTouchEvent(sev.tfinger, sev.type);
+		break;
+#endif
 	case SDL_MOUSEBUTTONDOWN:
 	case SDL_MOUSEBUTTONUP:
 	case SDL_MOUSEMOTION:
@@ -449,10 +601,42 @@ void MessagePump (const SDL_Event &sev)
 
 	case SDL_JOYBUTTONDOWN:
 	case SDL_JOYBUTTONUP:
+#ifdef ZD_VITA
+		if (menuactive == MENU_Off && (ConsoleState == c_down || ConsoleState == c_falling))
+		{
+			if (sev.type == SDL_JOYBUTTONDOWN)
+			{
+				if (sev.jbutton.button == 2) I_VitaOpenConsoleKeyboard();
+				else if (sev.jbutton.button == 1 || sev.jbutton.button == 11)
+				{
+					event.type=EV_GUI_Event; event.subtype=EV_GUI_KeyDown;
+					event.data1=GK_ESCAPE; D_PostEvent(&event);
+				}
+			}
+			break;
+		}
+		// Gamepad events are also needed while a menu captures keyboard input.
+		if (use_joystick)
+#else
 		if (!GUICapture)
+#endif
 		{
 			event.type = sev.type == SDL_JOYBUTTONDOWN ? EV_KeyDown : EV_KeyUp;
 			event.data1 = KEY_FIRSTJOYBUTTON + sev.jbutton.button;
+#ifdef ZD_VITA
+			// SDL Vita order: Triangle, Circle, Cross, Square, L, R,
+			// Down, Left, Up, Right, Select, Start, L2, R2, L3, R3.
+			static const int vitaKeys[] = {
+				KEY_PAD_Y, KEY_PAD_B, KEY_PAD_A, KEY_PAD_X,
+				KEY_PAD_LSHOULDER, KEY_PAD_RSHOULDER,
+				KEY_PAD_DPAD_DOWN, KEY_PAD_DPAD_LEFT,
+				KEY_PAD_DPAD_UP, KEY_PAD_DPAD_RIGHT,
+				KEY_PAD_BACK, KEY_ESCAPE, KEY_PAD_LTRIGGER,
+				KEY_PAD_RTRIGGER, KEY_PAD_LTHUMB, KEY_PAD_RTHUMB
+			};
+			if (sev.jbutton.button < countof(vitaKeys))
+				event.data1 = vitaKeys[sev.jbutton.button];
+#endif
 			if(event.data1 != 0)
 				D_PostEvent(&event);
 		}
@@ -478,11 +662,17 @@ void I_StartTic ()
 {
 	I_CheckGUICapture ();
 	I_CheckNativeMouse ();
+#ifdef ZD_VITA
+	I_VitaPollKeyboard();
+#endif
 	I_GetEvent ();
 }
 
 void I_ProcessJoysticks ();
 void I_StartFrame ()
 {
+#ifdef ZD_VITA
+	if (I_VitaSystemKeyboardActive()) return;
+#endif
 	I_ProcessJoysticks();
 }
