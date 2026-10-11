@@ -32,6 +32,16 @@ inline std::string DisplayPath(const std::string &p) {
 inline std::string BaseName(const std::string &path) {
  return Lower(path.substr(path.find_last_of('/')+1));
 }
+// Deathkings needs the full Hexen IWAD; prefer its sibling, then the root, then subfolders.
+inline std::string RequiredBase(const std::vector<File> &files,const std::string &selected) {
+ if(BaseName(selected)!="hexdd.wad")return "";
+ std::string directory=selected.substr(0,selected.find_last_of('/')+1),fallback;
+ for(const File &f:files)if(f.iwad && BaseName(f.path)=="hexen.wad") {
+  if(f.path.substr(0,f.path.find_last_of('/')+1)==directory)return f.path;
+  if(fallback.empty() || f.path.substr(0,f.path.find_last_of('/')+1)=="ux0:data/zdoom-vita/iwad/")fallback=f.path;
+ }
+ return fallback;
+}
 // Hide redundant shareware choices without deleting any files.
 inline void HideRedundantShareware(std::vector<File> &files,std::string &selected) {
  std::string fullDoom;

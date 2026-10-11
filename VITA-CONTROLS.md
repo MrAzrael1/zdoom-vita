@@ -31,6 +31,8 @@ Put games in ux0:data/zdoom-vita/iwad/ and mods/patches in
 ux0:data/zdoom-vita/pwad/. Subfolders are supported. Bundled shareware and
 Freedoom games are also available. DOOM1.WAD is hidden when DOOM.WAD is present.
 Place VOICES.WAD beside STRIFE1.WAD for automatic loading.
+Selecting HEXDD.WAD also loads HEXEN.WAD automatically; keep both in iwad/
+or its subfolders. Hexen remains available as a separate launcher choice.
 
 ## Touch, console, and settings
 

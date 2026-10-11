@@ -149,6 +149,26 @@ int main(int argc,char**argv){
  assert(bundled.arguments[1]=="app0:/iwad/DOOM1.WAD");
  DArgs bundledAgain;Reset();Key(SDLK_F5);assert(I_VitaLauncher(&bundledAgain));
  assert(bundledAgain.arguments==bundled.arguments);
+ // Deathkings retains its own IWAD identity and passes the required Hexen path.
+ std::filesystem::create_directories("ux0:data/zdoom-vita/iwad/expansions");
+ Write("ux0:data/zdoom-vita/iwad/expansions/HEXDD.WAD","IWAD");
+ Write("ux0:data/zdoom-vita/iwad/HeXeN.WaD","IWAD");
+ VitaLauncher::Selection deathkings;deathkings.iwad="ux0:data/zdoom-vita/iwad/expansions/HEXDD.WAD";
+ deathkings.mods={"ux0:data/zdoom-vita/pwad/mods/b.pk3"};Save(deathkings);
+ DArgs dkArgs;Reset();Key(SDLK_F5);assert(I_VitaLauncher(&dkArgs));
+ assert((dkArgs.arguments==std::vector<std::string>{"-iwad",deathkings.iwad,"-file",
+ "ux0:data/zdoom-vita/pwad/mods/b.pk3","-vita-base-iwad","ux0:data/zdoom-vita/iwad/HeXeN.WaD"}));
+ std::vector<VitaLauncher::File> dkCatalog;limited=false;Scan(IwadRoot,"",0,true,dkCatalog,limited);
+ bool hexenVisible=false;for(const auto &f:dkCatalog)if(f.path=="ux0:data/zdoom-vita/iwad/HeXeN.WaD")hexenVisible=true;
+ assert(hexenVisible);
+ dkCatalog.push_back({"ux0:data/zdoom-vita/iwad/expansions/hexen.wad",true});
+ assert(VitaLauncher::RequiredBase(dkCatalog,deathkings.iwad)=="ux0:data/zdoom-vita/iwad/expansions/hexen.wad");
+ assert(VitaLauncher::RequiredBase(dkCatalog,"app0:/iwad/DOOM1.WAD").empty());
+ std::filesystem::remove("ux0:data/zdoom-vita/iwad/HeXeN.WaD");
+ DArgs noBase;Reset();Key(SDLK_F5);Key(SDLK_ESCAPE);assert(!I_VitaLauncher(&noBase)&&noBase.arguments.empty());
+ std::filesystem::remove_all("ux0:data/zdoom-vita/iwad/expansions");
+ // Restore the prior shareware selection for the following regression checks.
+ VitaLauncher::Selection shareware;shareware.iwad="app0:/iwad/DOOM1.WAD";Save(shareware);
  // A full Doom IWAD hides bundled shareware and replaces a saved shareware choice.
  Write("ux0:data/zdoom-vita/iwad/DoOm.WaD","IWAD");
  DArgs full;Reset();Key(SDLK_F5);assert(I_VitaLauncher(&full));

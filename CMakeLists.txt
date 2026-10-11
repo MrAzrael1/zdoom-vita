@@ -272,7 +272,7 @@ add_subdirectory( src )
 
 if( VITA )
 	set( ZDOOM_VITA_TITLE_ID "ZDVZ00001" CACHE STRING "Vita application title ID" )
-	set( ZDOOM_VITA_VERSION "00.10" CACHE STRING "Vita application version" )
+	set( ZDOOM_VITA_VERSION "00.11" CACHE STRING "Vita application version" )
 	# Local testing only. Leave empty for distribution builds.
 	set( ZDOOM_VITA_TEST_SOUNDFONT "" CACHE FILEPATH "Optional test SF2 packaged in the VPK" )
 	set( ZDOOM_VITA_DOOM_FONT ON CACHE BOOL "Use experimental Doom launcher font" )

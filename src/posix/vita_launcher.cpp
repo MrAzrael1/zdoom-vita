@@ -194,10 +194,11 @@ bool I_VitaLauncher(DArgs *args) {
  int tab=0,focus[2]={0,0},top[2]={0,0};
  for(size_t i=0;i<lists[0].size();++i)if(files[lists[0][i]].path==selection.iwad)focus[0]=int(i);
  bool running=true,launch=false;
+ std::string notice;
  auto choose=[&]() {
   if(lists[tab].empty())return;
   const File &f=files[lists[tab][focus[tab]]];
-  if(tab==0)selection.iwad=f.path;else selection.Toggle(f.path);
+  if(tab==0){selection.iwad=f.path;notice.clear();}else selection.Toggle(f.path);
  };
  while(running) {
   SDL_Event e;
@@ -228,7 +229,11 @@ bool I_VitaLauncher(DArgs *args) {
    if(action==2)tab=0;
    if(action==3)tab=1;
    if(action==4)choose();
-   if(action==5&&!selection.iwad.empty()){launch=true;running=false;}
+   if(action==5&&!selection.iwad.empty()) {
+    if(BaseName(selection.iwad)=="hexdd.wad" && RequiredBase(files,selection.iwad).empty())
+     notice="HEXDD.WAD REQUIRES HEXEN.WAD IN THE IWAD FOLDER";
+    else {launch=true;running=false;}
+   }
    if(action==6)selection.mods.clear();
    if(action==7){if(tab)tab=0;else running=false;}
   }
@@ -239,7 +244,7 @@ bool I_VitaLauncher(DArgs *args) {
   Color(renderer,139,151,175);Text(renderer,32,51,"SELECT YOUR GAME AND OPTIONAL MODS",2);
   Color(renderer,tab==0?70:34,tab==0?83:40,tab==0?116:55);Rect(renderer,32,70,440,32);
   Color(renderer,tab==1?70:34,tab==1?83:40,tab==1?116:55);Rect(renderer,488,70,440,32);
-  Color(renderer,240,240,245);Text(renderer,48,80,"IWADS",2);Text(renderer,504,80,"MODS - SELECT IN LOAD ORDER",2);
+  Color(renderer,240,240,245);Text(renderer,48,80,"IWADS",2);Text(renderer,504,80,"MODS - SELECT LOAD ORDER",2);
   for(int row=0;row<Rows;++row) {
    int i=top[tab]+row;
    if(i>=int(lists[tab].size()))break;
@@ -256,12 +261,12 @@ bool I_VitaLauncher(DArgs *args) {
    Text(renderer,44,184,tab?"PUT MODS IN UX0:DATA/ZDOOM-VITA/PWAD":"PUT GAMES IN UX0:DATA/ZDOOM-VITA/IWAD",2);
   }
   Color(renderer,139,151,175);
-  Text(renderer,32,448,limited?"SCAN LIMIT REACHED - FIRST 512 FILES, 4 SUBFOLDER LEVELS":tab?"MODS: UX0:DATA/ZDOOM-VITA/PWAD":"GAMES: USER IWAD FOLDER AND BUNDLED GAMES",2);
+  Text(renderer,32,448,!notice.empty()?notice.c_str():limited?"SCAN LIMIT REACHED - FIRST 512 FILES, 4 SUBFOLDER LEVELS":tab?"MODS: UX0:DATA/ZDOOM-VITA/PWAD":"IWADS: UX0:data/zdoom-vita/iwad",2);
   Text(renderer,32,475,"IWAD: "+(selection.iwad.empty()?std::string("NONE"):DisplayPath(selection.iwad)),2,52);
   Text(renderer,32,495,"MODS: "+std::to_string(selection.mods.size())+" - TRIANGLE CLEARS",2,52);
   Color(renderer,selection.iwad.empty()?50:55,selection.iwad.empty()?50:104,selection.iwad.empty()?50:78);
   Rect(renderer,680,478,248,35);Color(renderer,245,245,245);Text(renderer,708,488,"START GAME",2);
-  Color(renderer,139,151,175);Text(renderer,32,526,"D-PAD BROWSE  CROSS SELECT  SQUARE/START LAUNCH  CIRCLE BACK/EXIT",2);
+  Color(renderer,139,151,175);Text(renderer,32,526,"D-PAD BROWSE  CROSS SELECT  SQUARE/START LAUNCH  CIRCLE EXIT",2);
   SDL_RenderPresent(renderer);
   SDL_Delay(8);
  }
@@ -281,6 +286,11 @@ bool I_VitaLauncher(DArgs *args) {
   if(!voice.empty())I_VitaTrace("[Vita] Launcher: Strife voices autoload=%s\n",voice.c_str());
  }
  for(const std::string &arg:launchSelection.Arguments())args->AppendArg(arg.c_str());
+ std::string baseIwad=RequiredBase(files,selection.iwad);
+ if(!baseIwad.empty()) {
+  args->AppendArg("-vita-base-iwad");args->AppendArg(baseIwad.c_str());
+  I_VitaTrace("[Vita] Launcher: required Hexen base=%s\n",baseIwad.c_str());
+ }
  I_VitaTrace("[Vita] Launcher: IWAD=%s mods=%d\n",selection.iwad.c_str(),int(selection.mods.size()));
  for(const std::string &mod:selection.mods)I_VitaTrace("[Vita] Launcher: mod=%s\n",mod.c_str());
  return true;

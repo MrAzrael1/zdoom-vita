@@ -50,6 +50,7 @@
 #include "version.h"
 #ifdef ZD_VITA
 #include "posix/vita_launcher.h"
+#include "posix/vita_debug.h"
 #endif
 
 
@@ -424,6 +425,34 @@ int FIWadManager::IdentifyVersion (TArray<FString> &wadfiles, const char *iwad, 
 			CheckIWAD ("", &wads[0]);
 		}
 	}
+
+#ifdef ZD_VITA
+    if (iwadparm != NULL && !wads[0].Path.IsEmpty() &&
+        mIWads[wads[0].Type].Required.IsNotEmpty())
+    {
+        const char *specifiedBase = Args->CheckValue("-vita-base-iwad");
+        std::string base = specifiedBase != NULL ? specifiedBase :
+            I_VitaCompanionFile(wads[0].Path.GetChars(), "hexen.wad");
+        if (!base.empty())
+        {
+            int type = ScanIWAD(base.c_str());
+            if (type >= 0 && !mIWads[wads[0].Type].Required.Compare(mIWads[type].Name))
+            {
+                for (unsigned j = 1; j < mIWadNames.Size(); ++j)
+                {
+                    if (!stricmp(mIWadNames[j].GetChars(), "hexen.wad"))
+                    {
+                        wads[j].Type = type;
+                        wads[j].Path = base.c_str();
+                        wads[j].Name = mIWads[type].Name;
+                        I_VitaTrace("[Vita] IWAD: required Hexen base=%s\n", base.c_str());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+#endif
 
 	if (iwadparm == NULL || wads[0].Path.IsEmpty() || mIWads[wads[0].Type].Required.IsNotEmpty())
 	{

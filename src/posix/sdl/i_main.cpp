@@ -254,7 +254,7 @@ int main (int argc, char **argv)
 	SceUID trace = sceIoOpen("ux0:data/zdoom-vita/boot-trace.log",
 		SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
 	if (trace >= 0) sceIoClose(trace);
-	I_VitaTrace("VITA-BUILD-v0.10.0: native trace started\n");
+	I_VitaTrace("VITA-BUILD-v0.11.0: native trace started\n");
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 	FILE *log = freopen("ux0:data/zdoom-vita/startup.log", "w", stdout);
 	if (log != NULL) setvbuf(stdout, NULL, _IONBF, 0);
