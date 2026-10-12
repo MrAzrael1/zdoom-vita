@@ -37,6 +37,7 @@
 #include "doomstat.h"
 #include "v_font.h"
 #include "v_video.h"
+#include "v_hudscale.h"
 #include "sbar.h"
 #include "r_defs.h"
 #include "w_wad.h"
@@ -944,11 +945,11 @@ void Popup::close()
 inline void adjustRelCenter(bool relX, bool relY, const double &x, const double &y, double &outX, double &outY, const double &xScale, const double &yScale)
 {
 	if(relX)
-		outX = x + (SCREENWIDTH/(hud_scale ? xScale*2 : 2));
+		outX = x + (SCREENWIDTH/(xScale*2));
 	else
 		outX = x;
 	if(relY)
-		outY = y + (SCREENHEIGHT/(hud_scale ? yScale*2 : 2));
+		outY = y + (SCREENHEIGHT/(yScale*2));
 	else
 		outY = y;
 }
@@ -1231,6 +1232,19 @@ public:
 				dcb += 200 - script->resH;
 			}
 
+			if (V_HudScale() != 1.0)
+			{
+				double scale = V_HudScale();
+				V_ScaleStatusBar(dx, dy, w, h, SCREENWIDTH, SCREENHEIGHT, scale);
+				if (cx != 0) dcx = SCREENWIDTH*0.5 + (dcx-SCREENWIDTH*0.5)*scale;
+				if (cy != 0) dcy = SCREENHEIGHT + (dcy-SCREENHEIGHT)*scale;
+				if (cr != 0) dcr = SCREENWIDTH*0.5 + (dcr-SCREENWIDTH*0.5)*scale;
+				if (cb != 0) dcb = SCREENHEIGHT + (dcb-SCREENHEIGHT)*scale;
+				// A clear operation uses the image bounds even without explicit clipping.
+				else if (clearDontDraw) dcb = SCREENHEIGHT + (dcb-SCREENHEIGHT)*scale;
+				if (cr == 0 && clearDontDraw) dcr = SCREENWIDTH*0.5 + (dcr-SCREENWIDTH*0.5)*scale;
+			}
+
 			if(clearDontDraw)
 				screen->Clear(static_cast<int>(MAX<double>(dx, dcx)), static_cast<int>(MAX<double>(dy, dcy)), static_cast<int>(MIN<double>(dcr,w+MAX<double>(dx, dcx))), static_cast<int>(MIN<double>(dcb,MAX<double>(dy, dcy)+h)), GPalette.BlackIndex, 0);
 			else
@@ -1273,8 +1287,8 @@ public:
 		{
 			double rx, ry, rcx=0, rcy=0, rcr=INT_MAX, rcb=INT_MAX;
 
-			double xScale = !hud_scale ? 1 : script->cleanX;
-			double yScale = !hud_scale ? 1 : script->cleanY;
+			double xScale = (hud_scale ? script->cleanX : 1) * V_HudScale();
+			double yScale = (hud_scale ? script->cleanY : 1) * V_HudScale();
 
 			adjustRelCenter(x.RelCenter(), y.RelCenter(), dx, dy, rx, ry, xScale, yScale);
 
@@ -1287,7 +1301,7 @@ public:
 			h = (forceHeight < 0 ? texture->GetScaledHeightDouble() : forceHeight);
 			if(vid_fps && rx < 0 && ry >= 0)
 				ry += 10;
-			if(hud_scale)
+			if(hud_scale || V_HudScale() != 1.0)
 			{
 				rx *= xScale;
 				ry *= yScale;
@@ -1363,10 +1377,10 @@ public:
 
 		if(fullScreenOffsets)
 		{
-			if(hud_scale)
+			if(hud_scale || V_HudScale() != 1.0)
 			{
-				xScale = script->cleanX;
-				yScale = script->cleanY;
+				xScale = (hud_scale ? script->cleanX : 1) * V_HudScale();
+				yScale = (hud_scale ? script->cleanY : 1) * V_HudScale();
 			}
 			adjustRelCenter(x.RelCenter(), y.RelCenter(), *x, *y, ax, ay, xScale, yScale);
 		}
@@ -1435,6 +1449,12 @@ public:
 				{
 					ry += (200 - script->resH);
 				}
+				if (V_HudScale() != 1.0)
+				{
+					V_ScaleStatusBar(rx, ry, rw, rh, SCREENWIDTH, SCREENHEIGHT, V_HudScale());
+					xScale = yScale = V_HudScale();
+				}
+
 			}
 			else
 			{
@@ -1444,7 +1464,7 @@ public:
 				bool xright = rx < 0;
 				bool ybot = ry < 0;
 
-				if(hud_scale)
+				if(hud_scale || V_HudScale() != 1.0)
 				{
 					rx *= xScale;
 					ry *= yScale;

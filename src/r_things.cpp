@@ -30,6 +30,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <algorithm>
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 #include "templates.h"
 #include "doomdef.h"
@@ -2223,10 +2226,17 @@ void R_DrawMaskedSingle (bool renew)
 	R_SplitVisSprites ();
 #endif
 
+#ifdef ZD_VITA
+	Uint64 vitaSpriteStart = I_VitaPerfClock();
+	I_VitaPerfSprites(vsprcount);
+#endif
 	for (i = vsprcount; i > 0; i--)
 	{
 		R_DrawSprite (spritesorter[i-1]);
 	}
+#ifdef ZD_VITA
+	I_VitaPerfAdd(VPERF_SPRITE_DRAW, vitaSpriteStart);
+#endif
 
 	// render any remaining masked mid textures
 
@@ -2255,7 +2265,13 @@ void R_DrawHeightPlanes(fixed_t height); // kg3D - fake planes
 
 void R_DrawMasked (void)
 {
+#ifdef ZD_VITA
+	Uint64 vitaSortStart = I_VitaPerfClock();
+#endif
 	R_SortVisSprites (DrewAVoxel ? sv_compare2d : sv_compare, firstvissprite - vissprites);
+#ifdef ZD_VITA
+	I_VitaPerfAdd(VPERF_SPRITE_SORT, vitaSortStart);
+#endif
 
 	if (height_top == NULL)
 	{ // kg3D - no visible 3D floors, normal rendering

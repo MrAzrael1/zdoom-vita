@@ -878,7 +878,7 @@ set( NOT_COMPILED_SOURCE_FILES
 
 if( VITA )
 	set( EXTERNAL_TIMIDITY_SOURCE )
-	set( VITA_SOUND_SOURCE sound/sdl_sound.cpp )
+	set( VITA_SOUND_SOURCE sound/sdl_sound.cpp sound/vita_vorbis.cpp )
 else( VITA )
 	set( EXTERNAL_TIMIDITY_SOURCE sound/music_midi_timidity.cpp )
 endif( VITA )

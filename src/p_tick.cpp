@@ -32,6 +32,9 @@
 #include "r_data/r_interpolate.h"
 #include "i_sound.h"
 #include "g_level.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 extern gamestate_t wipegamestate;
 
@@ -125,7 +128,13 @@ void P_Ticker (void)
 
 	StatusBar->Tick ();		// [RH] moved this here
 	level.Tick ();			// [RH] let the level tick
+#ifdef ZD_VITA
+	Uint64 vitaThinkStart = I_VitaPerfClock();
+#endif
 	DThinker::RunThinkers ();
+#ifdef ZD_VITA
+	I_VitaPerfAdd(VPERF_THINKERS, vitaThinkStart);
+#endif
 
 	//if added by MC: Freeze mode.
 	if (!bglobal.freeze && !(level.flags2 & LEVEL2_FROZEN))

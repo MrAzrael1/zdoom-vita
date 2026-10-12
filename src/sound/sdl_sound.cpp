@@ -5,9 +5,13 @@
 #include <cmath>
 #include <cstring>
 #include "i_sound.h"
+#include "c_cvars.h"
+#include "vita_vorbis.h"
 #include "files.h"
 #include "posix/vita_debug.h"
 #include "posix/vita_perf.h"
+
+EXTERN_CVAR (Bool, snd_pitched)
 
 namespace {
 const int OutputRate = 44100;
@@ -29,7 +33,7 @@ public:
 	void *userdata;
 	std::vector<BYTE> buffer;
 	int flags, rate, channels, bytesPerSample, frames;
-	double cursor;
+	double cursor, step;
 	unsigned int playedFrames;
 	float volume;
 	bool active, paused, ended;
@@ -37,7 +41,7 @@ public:
 		: owner(renderer), callback(cb), userdata(ud), flags(fmt), rate(hz),
 		  channels((fmt & Mono) ? 1 : 2),
 		  bytesPerSample((fmt & Float) || (fmt & Bits32) ? 4 : (fmt & Bits8) ? 1 : 2),
-		  cursor(0), playedFrames(0), volume(1), active(false), paused(false), ended(false)
+		  cursor(0), step(double(hz)/OutputRate), playedFrames(0), volume(1), active(false), paused(false), ended(false)
 	{
 		frames = bytes / (channels * bytesPerSample);
 		buffer.resize(frames * channels * bytesPerSample);
@@ -61,14 +65,21 @@ public:
 		while (cursor >= frames) {
 			double carry = cursor - frames;
 			memset(buffer.data(),(flags & Bits8) ? 128 : 0,buffer.size());
-			if (!callback(this, buffer.data(), int(buffer.size()), userdata)) { Stop(); return false; }
+			bool filled;
+			{
+#ifdef ZD_VITA
+				FVitaPerfScope vitaSynth(VPERF_SYNTH);
+#endif
+				filled = callback(this, buffer.data(), int(buffer.size()), userdata);
+			}
+			if (!filled) { Stop(); return false; }
 			cursor = carry;
 		}
 		int index = int(cursor);
 		if (index >= frames) { Stop(); return false; }
 		left = ReadValue(index*channels)*volume;
 		right = channels == 2 ? ReadValue(index*channels+1)*volume : left;
-		cursor += double(rate)/OutputRate;
+		cursor += step;
 		++playedFrames;
 		return true;
 	}
@@ -149,7 +160,20 @@ public:
 		return result;
 	}
 	SoundHandle LoadSound(BYTE *data,int length) {
+#ifdef ZD_VITA
+		FVitaPerfScope vitaSoundDecode(VPERF_SOUND_LOAD);
+#endif
 		SoundHandle result={NULL};
+		if(!data || length<=0)return result;
+		if(length>=4 && memcmp(data,"OggS",4)==0) {
+			Sample *sample=new Sample;
+			if(!VitaDecodeVorbis(data,length,sample->pcm,sample->rate,sample->channels)) {
+				delete sample;I_VitaTrace("[Vita] Audio: Ogg effect decode failed (%d bytes)\n",length);
+				return result;
+			}
+			sample->loopStart=0;sample->loopEnd=sample->Frames();
+			result.data=sample;return result;
+		}
 		SDL_AudioSpec spec;
 		Uint8 *pcm=NULL; Uint32 bytes=0;
 		if(!SDL_LoadWAV_RW(SDL_RWFromConstMem(data,length),1,&spec,&pcm,&bytes)) return result;
@@ -194,7 +218,7 @@ public:
 		if(!voice) return NULL;
 		voice->sample=(Sample*)sound.data;
 		voice->volume=vol; voice->flags=flags;
-		voice->step=double(voice->sample->rate)/OutputRate * (pitch>0 ? pitch/128.0 : 1.0);
+		voice->step=double(voice->sample->rate)/OutputRate * (snd_pitched && pitch>0 ? pitch/128.0 : 1.0);
 		voice->channel=reuse ? reuse : S_GetChannel(voice);
 		voice->channel->SysChannel=voice;
 		voice->channel->StartTime.AsOne=SDL_GetTicks();
@@ -226,24 +250,35 @@ public:
 		// Top up at game-tick cadence, with a bounded queue (~70ms).
 		for(int block=0;block<6 && SDL_GetQueuedAudioSize(device)<3072*4;++block) {
 			float mix[MixFrames*2]={0};
+#ifdef ZD_VITA
+			Uint64 vitaEffectStart = I_VitaPerfClock();
+#endif
 			for(int v=0;v<VoiceCount;++v) {
 				Voice &voice=voices[v];
 				if(!voice.channel || voice.finished || (pauseSlots && !(voice.flags&SNDF_NOPAUSE)))continue;
 				Sample &s=*voice.sample;
+				const int end=(voice.flags&SNDF_LOOP)?s.loopEnd:s.Frames();
+				const int channels=s.channels;
+				const short *pcm=s.pcm.data();
+				const double step=voice.step;
+				double position=voice.position;
 				for(int i=0;i<MixFrames;++i) {
-					int end=(voice.flags&SNDF_LOOP)?s.loopEnd:s.Frames();
-					if(voice.position>=end) {
-						if(voice.flags&SNDF_LOOP) voice.position=s.loopStart+std::fmod(voice.position-end,double(end-s.loopStart));
+					if(position>=end) {
+						if(voice.flags&SNDF_LOOP) position=s.loopStart+std::fmod(position-end,double(end-s.loopStart));
 						else { voice.finished=true; break; }
 					}
-					int frame=int(voice.position), index=frame*s.channels;
-					float l=s.pcm[index]/32768.f;
-					float r=s.channels==2 ? s.pcm[index+1]/32768.f : l;
+					int frame=int(position), index=frame*channels;
+					float l=pcm[index]/32768.f;
+					float r=channels==2 ? pcm[index+1]/32768.f : l;
 					mix[i*2]+=l*voice.volume*voice.left*sfxVolume;
 					mix[i*2+1]+=r*voice.volume*voice.right*sfxVolume;
-					voice.position+=voice.step;
+					position+=step;
 				}
+				voice.position=position;
 			}
+#ifdef ZD_VITA
+			I_VitaPerfAdd(VPERF_EFFECT_MIX, vitaEffectStart);
+#endif
 			for(size_t s=0;s<streams.size();++s) for(int i=0;i<MixFrames;++i) {
 				float l=0,r=0;
 				if(streams[s]->ReadFrame(l,r)) { mix[i*2]+=l*musicVolume; mix[i*2+1]+=r*musicVolume; }

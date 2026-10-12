@@ -35,6 +35,9 @@
 #include "p_enemy.h"
 #include "sbar.h"
 #include "c_dispatch.h"
+#ifdef ZD_VITA
+#include "c_cvars.h"
+#endif
 #include "v_video.h"
 #include "w_wad.h"
 #include "a_keys.h"
@@ -1115,3 +1118,51 @@ CCMD (mdk)
 	Net_WriteByte (DEM_GENERICCHEAT);
 	Net_WriteByte (CHT_MDK);
 }
+
+#ifdef ZD_VITA
+// Classic Doom codes exposed to the Vita console/IME. Existing iddqd,
+// idclev and idmus commands live elsewhere and are deliberately reused.
+static void cht_ConsoleDoomCheat(int cheat)
+{
+	if (CheckCheatmode()) return;
+	if (gamestate != GS_LEVEL)
+	{
+		Printf("Start a game before using this cheat.\n");
+		return;
+	}
+	// Follow the standard console cheat path for demo/network synchronization.
+	Net_WriteByte(DEM_GENERICCHEAT);
+	Net_WriteByte(cheat);
+}
+
+CCMD(idkfa) { cht_ConsoleDoomCheat(CHT_IDKFA); }
+CCMD(idfa) { cht_ConsoleDoomCheat(CHT_IDFA); }
+CCMD(idclip) { cht_ConsoleDoomCheat(CHT_NOCLIP); }
+CCMD(idspispopd) { cht_ConsoleDoomCheat(CHT_NOCLIP); }
+CCMD(idchoppers) { cht_ConsoleDoomCheat(CHT_CHAINSAW); }
+CCMD(idbeholdv) { cht_ConsoleDoomCheat(CHT_BEHOLDV); }
+CCMD(idbeholds) { cht_ConsoleDoomCheat(CHT_BEHOLDS); }
+CCMD(idbeholdi) { cht_ConsoleDoomCheat(CHT_BEHOLDI); }
+CCMD(idbeholdr) { cht_ConsoleDoomCheat(CHT_BEHOLDR); }
+CCMD(idbeholda) { cht_ConsoleDoomCheat(CHT_BEHOLDA); }
+CCMD(idbeholdl) { cht_ConsoleDoomCheat(CHT_BEHOLDL); }
+
+CCMD(idbehold)
+{
+	Printf("%s\n", GStrings("STSTR_BEHOLD"));
+	Printf("Console: idbeholdv, idbeholds, idbeholdi, idbeholdr, idbeholda, idbeholdl\n");
+}
+
+EXTERN_CVAR(Int, am_cheat)
+CCMD(iddt)
+{
+	if (CheckCheatmode()) return;
+	if (gamestate != GS_LEVEL)
+	{
+		Printf("Start a game before using this cheat.\n");
+		return;
+	}
+	// Usable with the console open; inspect the result on the automap.
+	am_cheat = (am_cheat + 1) % 3;
+}
+#endif

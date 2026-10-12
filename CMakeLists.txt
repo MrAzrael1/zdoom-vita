@@ -272,7 +272,7 @@ add_subdirectory( src )
 
 if( VITA )
 	set( ZDOOM_VITA_TITLE_ID "ZDVZ00001" CACHE STRING "Vita application title ID" )
-	set( ZDOOM_VITA_VERSION "00.11" CACHE STRING "Vita application version" )
+	set( ZDOOM_VITA_VERSION "00.12" CACHE STRING "Vita application version" )
 	# Local testing only. Leave empty for distribution builds.
 	set( ZDOOM_VITA_TEST_SOUNDFONT "" CACHE FILEPATH "Optional test SF2 packaged in the VPK" )
 	set( ZDOOM_VITA_DOOM_FONT ON CACHE BOOL "Use experimental Doom launcher font" )
@@ -304,6 +304,7 @@ if( VITA )
 		NAME "ZDoom Vita"
 		FILE "${CMAKE_SOURCE_DIR}/zdoom-vita-icon0.png" sce_sys/icon0.png
 		FILE "${CMAKE_SOURCE_DIR}/README.txt" README.txt
+		FILE "${CMAKE_SOURCE_DIR}/src/thirdparty/stb_vorbis.LICENSE.txt" licenses/stb_vorbis.txt
 		FILE "${ZDOOM_OUTPUT_DIR}/zdoom.pk3" zdoom.pk3 ${VITA_MUSIC_FILES} )
 	if( CMAKE_VERSION VERSION_LESS "3.20.0" )
 		add_dependencies( zdoom.vpk pk3 )

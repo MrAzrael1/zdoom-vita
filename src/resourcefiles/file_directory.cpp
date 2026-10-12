@@ -198,7 +198,12 @@ int FDirectory::AddDirectory(const char *dirpath)
 		if (directory == NULL)
 		{
 			Printf("Could not read directory: %s\n", strerror(errno));
+#ifdef ZD_VITA
+			// Keep resources already found when one child directory is unreadable.
+			continue;
+#else
 			return 0;
+#endif
 		}
 
 		struct dirent *file;
@@ -210,13 +215,24 @@ int FDirectory::AddDirectory(const char *dirpath)
 			FString fullFileName = scanDirectories[i] + file->d_name;
 
 			struct stat fileStat;
+			#ifdef ZD_VITA
+			if (stat(fullFileName.GetChars(), &fileStat) != 0)
+			{
+				Printf("Could not stat %s: %s\n", fullFileName.GetChars(), strerror(errno));
+				continue;
+			}
+#else
 			stat(fullFileName.GetChars(), &fileStat);
+#endif
 
 			if(S_ISDIR(fileStat.st_mode))
 			{
 				scanDirectories.Push(scanDirectories[i] + file->d_name + "/");
 				continue;
 			}
+#ifdef ZD_VITA
+			if (!S_ISREG(fileStat.st_mode)) continue;
+#endif
 			AddEntry(scanDirectories[i] + file->d_name, fileStat.st_size);
 			count++;
 		}
@@ -286,7 +302,7 @@ bool FDirectory::Open(bool quiet)
 {
 	NumLumps = AddDirectory(Filename);
 	if (!quiet) Printf(", %d lumps\n", NumLumps);
-	PostProcessArchive(&Lumps[0], sizeof(FDirectoryLump));
+	if (NumLumps != 0) PostProcessArchive(&Lumps[0], sizeof(FDirectoryLump));
 	return true;
 }
 

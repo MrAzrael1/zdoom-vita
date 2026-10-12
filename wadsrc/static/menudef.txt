@@ -774,6 +774,11 @@ OptionMenu "HUDOptions"
 	Option "Poison damage flashes",		"pf_poison",		"ZDoomHexen"
 	Option "Ice death flashes",			"pf_ice",			"ZDoomHexen"
 	Option "Poison Buildup flashes",	"pf_hazard",		"ZDoomStrife"
+	IfOption(Vita)
+	{
+		StaticText " "
+		Slider "HUD scale (%)", "vita_hudscale", 25, 150, 5, 0
+	}
 }
 	
 //-------------------------------------------------------------------------------------------
@@ -1771,7 +1776,13 @@ OptionMenu "VitaSettings"
 	Option "Render size", "vita_scaling", "VitaRenderSizes"
 	StaticText "Higher resolutions will reduce FPS."
 	StaticText " "
+	Slider "HUD scale (%)", "vita_hudscale", 25, 150, 5, 0
+	StaticText " "
 	Option "Show FPS", "vid_fps", "OnOff"
 	StaticText " "
 	Option "Rear Touchpad Weapon Switch", "vita_rearweapons", "OnOff"
+	StaticText " "
+	Option "Preload effects", "vita_precacheeffects", "OnOff"
+	StaticText "(EXPERIMENTAL) MAY HELP PERFORMANCE"
+	StaticText "AT COST OF SLOWER MAP LOAD SPEEDS."
 }

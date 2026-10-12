@@ -54,6 +54,7 @@
 #include "g_level.h"
 #include "st_stuff.h"
 #include "sbar.h"
+#include "v_hudscale.h"
 
 #include "i_system.h"
 #include "i_video.h"
@@ -76,6 +77,24 @@ int CleanXfac_1, CleanYfac_1, CleanWidth_1, CleanHeight_1;
 extern "C" short spanend[MAXHEIGHT];
 
 CVAR (Bool, hud_scale, false, CVAR_ARCHIVE);
+
+#ifdef __vita__
+CUSTOM_CVAR (Float, vita_hudscale, 100.0f, CVAR_ARCHIVE)
+{
+ if (self != self) self = 100.0f;
+ else if (self < 25.0f) self = 25.0f;
+ else if (self > 150.0f) self = 150.0f;
+}
+#endif
+
+double V_HudScale()
+{
+#ifdef __vita__
+ return double(vita_hudscale) * 0.01;
+#else
+ return 1.0;
+#endif
+}
 
 // For routines that take RGB colors, cache the previous lookup in case there
 // are several repetitions with the same color.
@@ -479,18 +498,20 @@ bool DCanvas::ParseDrawTextureTags (FTexture *img, double x, double y, DWORD tag
 				bool ybot = parms->y < 0;
 				intval = va_arg(tags, int);
 
-				if (hud_scale)
+				double xscale = (hud_scale ? CleanXfac : 1) * V_HudScale();
+				double yscale = (hud_scale ? CleanYfac : 1) * V_HudScale();
+				if (hud_scale || V_HudScale() != 1.0)
 				{
-					parms->x *= CleanXfac;
+					parms->x *= xscale;
 					if (intval == HUD_HorizCenter)
 						parms->x += Width * 0.5;
 					else if (xright)
 						parms->x = Width + parms->x;
-					parms->y *= CleanYfac;
+					parms->y *= yscale;
 					if (ybot)
 						parms->y = Height + parms->y;
-					parms->destwidth = parms->texwidth * CleanXfac;
-					parms->destheight = parms->texheight * CleanYfac;
+					parms->destwidth = parms->texwidth * xscale;
+					parms->destheight = parms->texheight * yscale;
 				}
 				else
 				{

@@ -108,10 +108,18 @@ static const char SpinnyProgressChars[4] = { '|', '/', '-', '\\' };
 //
 //==========================================================================
 
+#ifdef ZD_VITA
+#include "vita_startup.inc"
+#endif
+
 FStartupScreen *FStartupScreen::CreateInstance(int max_progress)
 {
 	atterm(DeleteStartupScreen);
+	#ifdef ZD_VITA
+	return new FVitaStartupScreen(max_progress);
+#else
 	return new FTTYStartupScreen(max_progress);
+#endif
 }
 
 //===========================================================================

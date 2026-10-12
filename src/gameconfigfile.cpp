@@ -1,4 +1,7 @@
 #include "posix/vita_debug.h"
+#ifdef ZD_VITA
+#include "posix/vita_launcher.h"
+#endif
 /*
 ** gameconfigfile.cpp
 ** An .ini parser specifically for zdoom.ini
@@ -64,6 +67,9 @@ extern HWND Window;
 #include "gi.h"
 #include "d_main.h"
 
+#ifdef ZD_VITA
+EXTERN_CVAR (Bool, vita_profile)
+#endif
 EXTERN_CVAR (Bool, con_centernotify)
 EXTERN_CVAR (Int, msg0color)
 EXTERN_CVAR (Color, color)
@@ -216,6 +222,10 @@ void FGameConfigFile::DoAutoloadSetup (FIWadManager *iwad_man)
 	// they will appear in the file.
 
 	double last = 0;
+#ifdef ZD_VITA
+	bool launcherProfile;
+	if (I_VitaLauncherProfile(launcherProfile)) vita_profile = launcherProfile;
+#endif
 	if (SetSection ("LastRun"))
 	{
 		const char *lastver = GetValueForKey ("Version");
@@ -545,6 +555,21 @@ void FGameConfigFile::ReadCVars (DWORD flags)
 
 void FGameConfigFile::ArchiveGameData (const char *gamename)
 {
+#ifdef ZD_VITA
+ // ArchiveBindings uses temporary markers to separate custom actions from
+ // ordinary bindings. Vita saves while running, so restore the live state
+ // after serialization, including when archiving throws.
+ struct BindingArchiveState
+ {
+  FKeyBindings normal, doubleClick;
+  BindingArchiveState() : normal(Bindings), doubleClick(DoubleBindings) {}
+  ~BindingArchiveState()
+  {
+   Bindings = normal;
+   DoubleBindings = doubleClick;
+  }
+ } bindingArchiveState;
+#endif
 	char section[32*3], *subsection;
 
 	sublen = countof(section) - 1 - mysnprintf (section, countof(section), "%s.", gamename);

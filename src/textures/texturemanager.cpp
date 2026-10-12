@@ -53,8 +53,18 @@
 #include "r_renderer.h"
 #include "r_sky.h"
 #include "textures/textures.h"
+#ifdef ZD_VITA
+#include "actor.h"
+#include "info.h"
+#include "r_state.h"
+#include "posix/vita_debug.h"
+#endif
+
 
 FTextureManager TexMan;
+#ifdef ZD_VITA
+CVAR(Bool, vita_precacheeffects, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+#endif
 
 CUSTOM_CVAR(Bool, vid_nopalsubstitutions, false, CVAR_ARCHIVE)
 {
@@ -1254,6 +1264,56 @@ void FTextureManager::PrecacheLevel (void)
 	{
 		Renderer->PrecacheTexture(ByIndex(i), hitlist[i]);
 	}
+
+#ifdef ZD_VITA
+	if (vita_precacheeffects)
+	{
+		// Prefetch sprites for non-normal styles, projectiles and noninteractive effects.
+		// Include inherited states: these classes may not yet exist on the map.
+		// Keep spans lazy so the extra pixel cache has a predictable limit.
+		BYTE *effects = new BYTE[cnt]();
+		for (unsigned n = 0; n < PClass::m_Types.Size(); ++n)
+		{
+			PClass *type = PClass::m_Types[n];
+			if (!type->ActorInfo || !type->IsDescendantOf(RUNTIME_CLASS(AActor))) continue;
+			AActor *defaults = GetDefaultByType(type);
+			if (!defaults) continue;
+			if (defaults->RenderStyle == LegacyRenderStyles[STYLE_Normal] &&
+				!(defaults->flags & MF_MISSILE) && !(defaults->flags5 & MF5_NOINTERACTION)) continue;
+			for (const PClass *owner = type; owner && owner->ActorInfo; owner = owner->ParentClass)
+			{
+				FActorInfo *info = owner->ActorInfo;
+				for (int state = 0; state < info->NumOwnedStates; ++state)
+				{
+					unsigned sprite = info->OwnedStates[state].sprite;
+					if (sprite >= sprites.Size()) continue;
+					for (int frame = 0; frame < sprites[sprite].numframes; ++frame)
+					{
+						const spriteframe_t &sf = SpriteFrames[sprites[sprite].spriteframes + frame];
+						for (int rot = 0; rot < 16; ++rot)
+							if (sf.Texture[rot].isValid()) effects[sf.Texture[rot].GetIndex()] = 1;
+					}
+				}
+			}
+		}
+		size_t bytes = 0;
+		unsigned loaded = 0, skipped = 0;
+		const size_t limit = 32u * 1024u * 1024u;
+		for (int i = 0; i < cnt; ++i)
+		{
+			FTexture *tex = ByIndex(i);
+			if (!effects[i] || hitlist[i] || !tex) continue;
+			size_t size = size_t(tex->GetWidth()) * tex->GetHeight();
+			if (!size || size > limit - bytes) { ++skipped; continue; }
+			tex->GetPixels();
+			bytes += size;
+			++loaded;
+		}
+		delete[] effects;
+		I_VitaTrace("[Vita] Preload: effect sprites=%u pixels=%u KiB budget-skipped=%u\n",
+			loaded, unsigned(bytes/1024), skipped);
+	}
+#endif
 
 	delete[] hitlist;
 }

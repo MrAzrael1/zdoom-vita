@@ -1,4 +1,7 @@
 #include "posix/vita_debug.h"
+#ifdef ZD_VITA
+#include "posix/vita_launcher.h"
+#endif
 // Emacs style mode select	 -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -261,6 +264,7 @@ void I_PrintStr (const char *cp)
 
 #ifdef ZD_VITA
 	I_VitaTrace("[Engine] %s", copy);
+	I_VitaStartupPrint(copy);
 #endif
 	fputs (copy, stdout);
 	delete [] copy;

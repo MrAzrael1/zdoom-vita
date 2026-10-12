@@ -1344,8 +1344,46 @@ static void InitKeySections()
 //
 //=============================================================================
 
+#ifdef ZD_VITA
+// Mods may replace OptionsMenu completely. Restore the platform entry only
+// after every MENUDEF has been parsed, without replacing any mod controls.
+static void M_EnsureVitaSettings(FMenuDescriptor *desc)
+{
+	const FName target("VitaSettings");
+	if (desc->mType == MDESC_OptionsMenu)
+	{
+		FOptionMenuDescriptor *menu = static_cast<FOptionMenuDescriptor*>(desc);
+		for (unsigned i = 0; i < menu->mItems.Size(); ++i)
+		{
+			if (menu->mItems[i]->GetAction(NULL) == target) return;
+		}
+		menu->mItems.Push(new FOptionMenuItemSubmenu("Vita Settings", "VitaSettings"));
+	}
+	else if (desc->mType == MDESC_ListMenu)
+	{
+		FListMenuDescriptor *menu = static_cast<FListMenuDescriptor*>(desc);
+		int y = menu->mYpos;
+		for (unsigned i = 0; i < menu->mItems.Size(); ++i)
+		{
+			if (menu->mItems[i]->GetAction(NULL) == target) return;
+			int bottom = menu->mItems[i]->GetY() + menu->mLinespacing;
+			if (bottom > y) y = bottom;
+		}
+		menu->mItems.Push(new FListMenuItemText(menu->mXpos, y,
+			menu->mLinespacing, 'v', "Vita Settings", menu->mFont,
+			menu->mFontColor, menu->mFontColor2, target));
+		menu->mYpos = y + menu->mLinespacing;
+	}
+}
+#endif
+
 void M_CreateMenus()
 {
+#ifdef ZD_VITA
+	FMenuDescriptor **options = MenuDescriptors.CheckKey(FName("OptionsMenu"));
+	if (options != NULL) M_EnsureVitaSettings(*options);
+#endif
+
 	BuildEpisodeMenu();
 	BuildPlayerclassMenu();
 	InitCrosshairsList();

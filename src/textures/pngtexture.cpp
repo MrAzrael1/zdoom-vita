@@ -41,6 +41,9 @@
 #include "bitmap.h"
 #include "v_palette.h"
 #include "textures/textures.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 //==========================================================================
 //
@@ -454,6 +457,9 @@ const BYTE *FPNGTexture::GetPixels ()
 
 void FPNGTexture::MakeTexture ()
 {
+#ifdef ZD_VITA
+	FVitaPerfScope vitaPNGDecode(VPERF_PNG_LOAD);
+#endif
 	FileReader *lump;
 
 	if (SourceLump >= 0)
@@ -519,6 +525,35 @@ void FPNGTexture::MakeTexture ()
 			in = tempix;
 			out = Pixels;
 
+#ifdef ZD_VITA
+			// Convert sequentially in the decoded buffer, then transpose bytes.
+			// Reading RGB(A) by column revisits distant cache lines for every
+			// column. Shrinking pixels in place is safe: output never overtakes
+			// the unread input. Alpha and palette lookup remain identical.
+			in = tempix;
+			out = tempix;
+			const int count = Width * Height;
+			switch (ColorType)
+			{
+			case 2:
+				for (int i = 0; i < count; ++i, in += 3)
+				{
+					*out++ = HaveTrans && in[0] == NonPaletteTrans[0] &&
+						in[1] == NonPaletteTrans[1] && in[2] == NonPaletteTrans[2]
+						? 0 : RGB32k.RGB[in[0]>>3][in[1]>>3][in[2]>>3];
+				}
+				break;
+			case 4:
+				for (int i = 0; i < count; ++i, in += 2)
+					*out++ = in[1] < 128 ? 0 : PaletteMap ? PaletteMap[in[0]] : in[0];
+				break;
+			case 6:
+				for (int i = 0; i < count; ++i, in += 4)
+					*out++ = in[3] < 128 ? 0 : RGB32k.RGB[in[0]>>3][in[1]>>3][in[2]>>3];
+				break;
+			}
+			FlipNonSquareBlock(Pixels, tempix, Width, Height, Width);
+#else
 			// Convert from source format to paletted, column-major.
 			// Formats with alpha maps are reduced to only 1 bit of alpha.
 			switch (ColorType)
@@ -596,6 +631,7 @@ void FPNGTexture::MakeTexture ()
 				}
 				break;
 			}
+#endif
 			delete[] tempix;
 		}
 	}

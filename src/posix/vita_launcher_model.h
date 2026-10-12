@@ -8,6 +8,8 @@ namespace VitaLauncher {
 struct File {
  std::string path;
  bool iwad;
+ bool directory;
+ File(const std::string &p,bool game,bool dir=false):path(p),iwad(game),directory(dir){}
 };
 inline std::string Lower(std::string s) {
  for(size_t i=0;i<s.size();++i)s[i]=char(std::tolower((unsigned char)s[i]));
@@ -58,6 +60,57 @@ inline bool IsModExtension(const std::string &path) {
  std::string ext=Lower(path.substr(dot));
  return ext==".wad" || ext==".pk3" || ext==".pk7" || ext==".zip" || ext==".deh" || ext==".bex";
 }
+
+inline std::string ConfigName(const std::string &text) {
+ std::string name;
+ for(unsigned char c:text)if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'||c==' ')
+  if(name.size()<64)name+=char(c);
+ size_t first=name.find_first_not_of(' ');
+ if(first==std::string::npos)return "";
+ return name.substr(first,name.find_last_not_of(' ')-first+1);
+}
+// Parse arguments directly; nothing is passed to a shell.
+inline bool ParseArguments(const std::string &text,std::vector<std::string> &out) {
+ std::vector<std::string> parsed;
+ std::string token;char quote=0;bool started=false;
+ for(size_t i=0;i<text.size();++i) {
+  unsigned char c=text[i];
+  if(c<32 || c>126)return false;
+  if(c=='\\' && i+1<text.size() && (text[i+1]=='"' || text[i+1]=='\\')) {
+   token+=text[++i];started=true;
+  } else if(quote) {
+   if(c==quote)quote=0;else token+=char(c);
+  } else if(c=='"' || c=='\'') {quote=c;started=true;}
+  else if(c==' ') {
+   if(started){parsed.push_back(token);token.clear();started=false;}
+  } else {token+=char(c);started=true;}
+  if(parsed.size()>64)return false;
+ }
+ if(quote)return false;
+ if(started)parsed.push_back(token);
+ if(parsed.size()>64)return false;
+ out.swap(parsed);return true;
+}
+inline bool ValidateConfig(const std::vector<std::string> &mods,const std::vector<File> &files,std::string &error) {
+ unsigned archives=0,patches=0;
+ std::vector<std::string> seen;
+ for(const std::string &path:mods) {
+  bool directory=false;
+  for(const File &file:files)if(!file.iwad && file.path==path)directory=file.directory;
+  if(!directory && !IsModExtension(path)){error="CONFIG CONTAINS AN UNSUPPORTED FILE";return false;}
+  size_t dot=path.find_last_of('.');
+  std::string ext=directory || dot==std::string::npos?"":Lower(path.substr(dot));
+  if(!directory && (ext==".deh" || ext==".bex"))++patches;else ++archives;
+  if(archives>8 || patches>1){error="CONFIG LIMIT: 8 MODS AND 1 DEH/BEX PATCH";return false;}
+  if(std::find(seen.begin(),seen.end(),path)!=seen.end()){error="CONFIG CONTAINS A DUPLICATE MOD";return false;}
+  seen.push_back(path);
+  bool found=false;
+  for(const File &file:files)if(!file.iwad && file.path==path){found=true;break;}
+  if(!found){error="MISSING MOD: "+DisplayPath(path);return false;}
+ }
+ error.clear();return true;
+}
+
 struct Selection {
  std::string iwad;
  std::vector<std::string> mods;
@@ -91,7 +144,8 @@ struct Selection {
   result.push_back("-iwad"); result.push_back(Resolve(iwad,true));
   std::vector<std::string> archives,patches;
   for(const std::string &p:mods) {
-   std::string ext=Lower(p.substr(p.find_last_of('.')));
+   size_t dot=p.find_last_of('.');
+   std::string ext=dot==std::string::npos?"":Lower(p.substr(dot));
    (ext==".deh" || ext==".bex"?patches:archives).push_back(p);
   }
   if(!archives.empty()) {

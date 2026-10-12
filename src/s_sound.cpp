@@ -51,6 +51,13 @@
 #include "g_level.h"
 #include "po_man.h"
 #include "farchive.h"
+#ifdef ZD_VITA
+#include "posix/vita_debug.h"
+#include "sound/vita_vorbis.h"
+#include <algorithm>
+#include <vector>
+EXTERN_CVAR(Bool, vita_precacheeffects)
+#endif
 
 // MACROS ------------------------------------------------------------------
 
@@ -464,6 +471,28 @@ void S_Start ()
 //
 //==========================================================================
 
+#ifdef ZD_VITA
+// Estimate retained PCM before decoding. Unsupported/ambiguous formats stay lazy.
+static size_t S_VitaPrecacheBytes(sfxinfo_t &sound)
+{
+	int length = Wads.LumpLength(sound.lumpnum);
+	if (length <= 0 || length > 1024*1024) return size_t(-1);
+	if (sound.bLoadRAW) return size_t(length)*4;
+	std::vector<BYTE> data(length);
+	FWadLump lump = Wads.OpenLumpNum(sound.lumpnum);
+	lump.Read(data.data(), length);
+	size_t bytes;
+	if (length >= 4 && !memcmp(data.data(), "OggS", 4))
+		return VitaVorbisPCMBytes(data.data(), length, bytes) ? bytes : size_t(-1);
+	if (length >= 8 && data[0] == 3 && data[1] == 0)
+		return size_t(length)*4; // Conservative stereo reservation for mono DMX.
+	// PCM WAV expands by at most 2x for 8-bit input. The deliberately larger
+	// reserve covers SDL's other WAV decoders without decoding just to reject.
+	if (length >= 12 && !memcmp(data.data(), "RIFF", 4) && !memcmp(data.data()+8, "WAVE", 4))
+		return size_t(length)*16;
+	return size_t(-1);
+}
+#endif
 void S_PrecacheLevel ()
 {
 	unsigned int i;
@@ -508,6 +537,55 @@ void S_PrecacheLevel ()
 				S_UnloadSound (&S_sfx[i]);
 			}
 		}
+#ifdef ZD_VITA
+		if (vita_precacheeffects)
+		{
+			// The stock precache only covers already-spawned actors' sounds.
+			// Decode additional concrete effects now, before gameplay.
+			const size_t limit = 16u * 1024u * 1024u;
+			size_t bytes = 0;
+			unsigned loaded = 0, skipped = 0;
+			std::vector<unsigned> candidates;
+			for (i = 1; i < S_sfx.Size(); ++i)
+			{
+				sfxinfo_t &sound = S_sfx[i];
+				if (!sound.data.isValid() && sound.link == sfxinfo_t::NO_LINK &&
+					!sound.bRandomHeader && !sound.bPlayerReserve && sound.lumpnum >= 0)
+					candidates.push_back(i);
+			}
+			// Later resource files are user mods/overrides. Prefer their short
+			// effects over unused base-game sounds and long ambient/dialogue clips.
+			std::stable_sort(candidates.begin(), candidates.end(), [](unsigned a, unsigned b)
+			{
+				int afile = Wads.GetLumpFile(S_sfx[a].lumpnum);
+				int bfile = Wads.GetLumpFile(S_sfx[b].lumpnum);
+				if (afile != bfile) return afile > bfile;
+				return Wads.LumpLength(S_sfx[a].lumpnum) < Wads.LumpLength(S_sfx[b].lumpnum);
+			});
+			for (unsigned n = 0; n < candidates.size(); ++n)
+			{
+				sfxinfo_t &sound = S_sfx[candidates[n]];
+				size_t estimate = S_VitaPrecacheBytes(sound);
+				if (estimate > limit - bytes) { ++skipped; continue; }
+				sfxinfo_t *actual = S_LoadSound(&sound);
+				if (actual != &sound || !sound.data.isValid()) continue;
+				// Final conservative check also protects against malformed metadata.
+				size_t size = size_t(GSnd->GetSampleLength(sound.data)) * 4u;
+				if (size > limit - bytes)
+				{
+					S_UnloadSound(&sound);
+					++skipped;
+					continue;
+				}
+				bytes += size;
+				sound.bUsed = true;
+				++loaded;
+			}
+			I_VitaTrace("[Vita] Preload: sounds=%u PCM-budget=%u KiB budget-skipped=%u\n",
+				loaded, unsigned(bytes/1024), skipped);
+		}
+#endif
+
 	}
 }
 

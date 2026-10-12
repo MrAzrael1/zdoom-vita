@@ -1,4 +1,7 @@
 #include "posix/vita_debug.h"
+#ifdef ZD_VITA
+#include "posix/vita_launcher.h"
+#endif
 #include "posix/vita_perf.h"
 
 // HEADER FILES ------------------------------------------------------------
@@ -366,6 +369,10 @@ void SDLVideo::SetWindowedScale (float scale)
 SDLFB::SDLFB (int width, int height, bool fullscreen, SDL_Window *oldwin)
 	: DFrameBuffer (width, height)
 {
+#ifdef ZD_VITA
+	I_VitaStartupEnd();
+#endif
+
 	int i;
 	
 	NeedPalUpdate = false;
@@ -881,31 +888,82 @@ ADD_STAT (blit)
 }
 
 #ifdef ZD_VITA
-CVAR(Bool, vita_profile, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vita_profile, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 bool I_VitaPerfEnabled() { return vita_profile; }
-static Uint64 VitaPerfTotals[VPERF_COUNT], VitaPerfWindowStart, VitaPerfMaxFrame;
-static unsigned VitaPerfFrames;
+// Nested timings overlap: thinkers are part of game, sprites are part of render.
+// Keep the slowest frame's breakdown as well as averages; explosions are brief.
+static Uint64 VitaPerfTotals[VPERF_COUNT], VitaPerfCurrent[VPERF_COUNT];
+static Uint64 VitaPerfWorst[VPERF_COUNT], VitaPerfWindowStart, VitaPerfMaxFrame;
+static unsigned VitaPerfFrames, VitaPerfSlowFrames, VitaPerfSpritesCurrent;
+static unsigned VitaPerfSpritesTotal, VitaPerfSpritesPeak, VitaPerfSpritesWorst;
 void I_VitaPerfAdd(EVitaPerfStage stage, Uint64 start)
 {
-	if (start) VitaPerfTotals[stage] += SDL_GetPerformanceCounter() - start;
+	if (start)
+	{
+		Uint64 elapsed = SDL_GetPerformanceCounter() - start;
+		VitaPerfTotals[stage] += elapsed;
+		VitaPerfCurrent[stage] += elapsed;
+	}
+}
+void I_VitaPerfSprites(unsigned count)
+{
+	if (I_VitaPerfEnabled()) VitaPerfSpritesCurrent += count;
 }
 void I_VitaPerfFrame(Uint64 start)
 {
-	if (!start) return;
+	if (!start)
+	{
+		memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
+		memset(VitaPerfCurrent, 0, sizeof(VitaPerfCurrent));
+		VitaPerfWindowStart = VitaPerfMaxFrame = 0;
+		VitaPerfFrames = VitaPerfSlowFrames = VitaPerfSpritesCurrent = 0;
+		VitaPerfSpritesTotal = VitaPerfSpritesPeak = VitaPerfSpritesWorst = 0;
+		return;
+	}
 	Uint64 now = SDL_GetPerformanceCounter();
+	Uint64 frequency = SDL_GetPerformanceFrequency();
 	if (!VitaPerfWindowStart) VitaPerfWindowStart = start;
 	Uint64 frame = now - start;
-	if (frame > VitaPerfMaxFrame) VitaPerfMaxFrame = frame;
+	if (frame > VitaPerfMaxFrame)
+	{
+		VitaPerfMaxFrame = frame;
+		memcpy(VitaPerfWorst, VitaPerfCurrent, sizeof(VitaPerfWorst));
+		VitaPerfSpritesWorst = VitaPerfSpritesCurrent;
+	}
+	if (frame > frequency / 30) ++VitaPerfSlowFrames;
+	VitaPerfSpritesTotal += VitaPerfSpritesCurrent;
+	if (VitaPerfSpritesCurrent > VitaPerfSpritesPeak)
+		VitaPerfSpritesPeak = VitaPerfSpritesCurrent;
+	VitaPerfSpritesCurrent = 0;
+	memset(VitaPerfCurrent, 0, sizeof(VitaPerfCurrent));
 	++VitaPerfFrames;
-	double seconds = double(now - VitaPerfWindowStart) / SDL_GetPerformanceFrequency();
+	double seconds = double(now - VitaPerfWindowStart) / frequency;
 	if (seconds < 5.0) return;
-	double ms = 1000.0 / SDL_GetPerformanceFrequency() / VitaPerfFrames;
+	double ms = 1000.0 / frequency / VitaPerfFrames;
 	I_VitaTrace("[Vita] Perf: %dx%d %.1f fps; game=%.2f display=%.2f render=%.2f convert=%.2f present=%.2f audio=%.2f ms/frame; max=%.2f ms\n",
 		screen->GetWidth(), screen->GetHeight(), VitaPerfFrames / seconds,
 		VitaPerfTotals[VPERF_GAME]*ms, VitaPerfTotals[VPERF_DISPLAY]*ms,
 		VitaPerfTotals[VPERF_RENDER]*ms, VitaPerfTotals[VPERF_CONVERT]*ms, VitaPerfTotals[VPERF_PRESENT]*ms,
-		VitaPerfTotals[VPERF_AUDIO]*ms, VitaPerfMaxFrame*1000.0/SDL_GetPerformanceFrequency());
+		VitaPerfTotals[VPERF_AUDIO]*ms, VitaPerfMaxFrame*1000.0/frequency);
+	I_VitaTrace("[Vita] Effects: thinkers=%.2f sort=%.2f sprites=%.2f ms/frame; sprite passes avg=%.1f peak=%u; frames over 33.3ms=%u/%u\n",
+		VitaPerfTotals[VPERF_THINKERS]*ms, VitaPerfTotals[VPERF_SPRITE_SORT]*ms,
+		VitaPerfTotals[VPERF_SPRITE_DRAW]*ms, double(VitaPerfSpritesTotal)/VitaPerfFrames,
+		VitaPerfSpritesPeak, VitaPerfSlowFrames, VitaPerfFrames);
+	double tickms = 1000.0 / frequency;
+	I_VitaTrace("[Vita] Worst frame: game=%.2f thinkers=%.2f render=%.2f sort=%.2f sprites=%.2f convert=%.2f present=%.2f audio=%.2f ms; sprite passes=%u\n",
+		VitaPerfWorst[VPERF_GAME]*tickms, VitaPerfWorst[VPERF_THINKERS]*tickms,
+		VitaPerfWorst[VPERF_RENDER]*tickms, VitaPerfWorst[VPERF_SPRITE_SORT]*tickms,
+		VitaPerfWorst[VPERF_SPRITE_DRAW]*tickms, VitaPerfWorst[VPERF_CONVERT]*tickms,
+		VitaPerfWorst[VPERF_PRESENT]*tickms, VitaPerfWorst[VPERF_AUDIO]*tickms,
+		VitaPerfSpritesWorst);
+	I_VitaTrace("[Vita] Asset decode: PNG=%.2f sound=%.2f ms/frame; worst-frame PNG=%.2f sound=%.2f ms\n",
+		VitaPerfTotals[VPERF_PNG_LOAD]*ms, VitaPerfTotals[VPERF_SOUND_LOAD]*ms,
+		VitaPerfWorst[VPERF_PNG_LOAD]*tickms, VitaPerfWorst[VPERF_SOUND_LOAD]*tickms);
+	I_VitaTrace("[Vita] Audio work: effects=%.2f synth=%.2f ms/frame; worst-frame effects=%.2f synth=%.2f ms\n",
+		VitaPerfTotals[VPERF_EFFECT_MIX]*ms, VitaPerfTotals[VPERF_SYNTH]*ms,
+		VitaPerfWorst[VPERF_EFFECT_MIX]*tickms, VitaPerfWorst[VPERF_SYNTH]*tickms);
 	memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
-	VitaPerfFrames = 0; VitaPerfMaxFrame = 0; VitaPerfWindowStart = now;
+	VitaPerfFrames = VitaPerfSlowFrames = VitaPerfSpritesTotal = VitaPerfSpritesPeak = 0;
+	VitaPerfMaxFrame = 0; VitaPerfWindowStart = now;
 }
 #endif
