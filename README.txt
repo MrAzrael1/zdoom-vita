@@ -10,7 +10,7 @@ Supports Hexen, Heretic, and Strife out of the box. Other IWADs probably work fi
 
 You can modify screen scaling and various other things under Options > Vita Settings. Your FPS will vary with these options, with 2X giving you the best performance.
 
-Your mileage will vary with mod support. As a general rule of thumb any ZDoom compatible mods released before 2016 might work. Mods released after that which require GZDoom or more modern features might not work. I would recommend against running any particularly crazy mods or maps, the performance probably won't be great.
+Your mileage will vary with mod support. As a general rule of thumb any ZDoom compatible mods released before 2016 might work. Mods released after that which require GZDoom or more modern features might not work. I would personally recommend against running Brutal Doom or any of it's derivative projects on this right now. The performance is currently not good with that mod, more performance fixing work is needed to make it playable.
 
 Anything that outright requires GZDoom *WILL NOT* work and I cannot fix this as it is outside of the scope of this project. Better Vita porters than I have said that GZDoom is just not possible due to the hardware so I tried this instead for the heck of it.
 
