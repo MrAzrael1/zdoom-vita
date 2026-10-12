@@ -8,17 +8,13 @@ Overclocking to 500MHz is more or less required for any decent levels of perform
 
 Supports Hexen, Heretic, and Strife out of the box. Other IWADs like Chex Quest probably work fine too.
 
-You can modify screen scaling and various other things under Options > Vita Settings. This includes the rear touchpad weapon-swapping behavior. [Known issue: The vita settings section may not show with mods that have their own custom Options fields. A solution is being researched.]
+You can modify screen scaling and various other things under Options > Vita Settings. This includes the rear touchpad weapon-swapping behavior.
 
 Your mileage will strongly vary with mod support. As a general rule of thumb any ZDoom or Skulltag compatible mods released before 2016 might work based on my own testing. Keyword being might, especially with Skulltag. [Known issue: Any mods that require OpenGL graphics or more advanced UZ/GZDoom coding features that were implemented after ZDoom was discontinued just will not work currently. A fix for this may not be possible.]
 
 Additionally as I know many looking here are brought by the promise of brutal doom: You may wish to wait a bit before getting too deep into a mod like that. The performance with that mod in particular is not great right now and while I am researching ways to squeeze more performance out of this port, it just may not ever be perfect. 
 
-Anything that outright requires GZ/UZDoom *WILL NOT* work and I cannot fix this as it is outside of the scope of this project. Better Vita porters than I have said that GZDoom is just not possible due to the hardware so I tried this instead for the heck of it.
-
 If you have issues, general comments, or feature requests, contact me at misterazrael1@gmail.com or you can join my tiny little discord I made for this project and any other future ports at https://discord.gg/sbvV2VPYtY for a faster response time if you don't feel like submitting an issue here on Github. I'm always interested in any good ideas anyone might have for future improvements, so shoot them my way if you got 'em.
-
-
 
 
 Disclaimers:
