@@ -1,5 +1,7 @@
 This is a working prototype-ish build of ZDoom v2.8.1 ported to the PSVITA. Comes with some minor tweaks to the engine and a novel launcher GUI to adapt to the PSVITA.
 
+This is something of a passion project by a former ZDoom/Skulltag modder and enthusiast of no particular importance. Releasing this publicly is my own small way of giving back to the homebrew community that has given me so much enjoyment over the years. Thanks from the bottom of my heart. <3  
+
 To run this with anything outside of the bundled inclusions, you will require .wad data files from a legal copy of Doom, Doom 2, et cetera; they can be bought really cheaply on Steam these days. Comes with copies of Freedoom and the Doom 1 Shareware Episode since both are freely, legally redistributable.  
 
 IWAD files (main game data .wad files for doom 1/2, tnt, plutonia, hexen, heretic, strife, etc.) go in ux0:data/zdoom-vita/iwad and PWAD files (mod files, custom maps, etc) go into ux0:data/zdoom-vita/pwad.
