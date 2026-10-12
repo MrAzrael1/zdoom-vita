@@ -10,7 +10,7 @@ Overclocking to 500MHz is more or less required for any decent levels of perform
 
 Supports Hexen, Heretic, and Strife out of the box. Other IWADs like Chex Quest probably work fine too.
 
-You can modify screen scaling and various other things under Options > Vita Settings. This includes the rear touchpad weapon-swapping behavior.
+You can modify screen scaling and various other things under Options > Vita Settings. This includes the rear touchpad weapon-swapping behavior, and HUD scaling in the event of mods having giant custom HUDs. 2x scaling gives the most performance at the highest cost to visual fidelity.
 
 Your mileage will strongly vary with mod support. As a general rule of thumb any ZDoom or Skulltag compatible mods released before 2016 might work based on my own testing. Keyword being might, especially with Skulltag. [Known issue: Any mods that require OpenGL graphics or more advanced UZ/GZDoom coding features that were implemented after ZDoom was discontinued just will not work currently. A fix for this may not be possible.]
 
