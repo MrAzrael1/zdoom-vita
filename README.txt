@@ -16,7 +16,7 @@ Your mileage will strongly vary with mod support. As a general rule of thumb any
 
 Additionally as I know many looking here are brought by the promise of brutal doom: You may wish to wait a bit before getting too deep into a mod like that. The performance with that mod in particular is not great right now and while I am researching ways to squeeze more performance out of this port, it just may not ever be perfect. 
 
-If you have issues, general comments, or feature requests, contact me at misterazrael1@gmail.com or you can join my tiny little discord I made for this project and any other future ports at https://discord.gg/sbvV2VPYtY for a faster response time if you don't feel like submitting an issue here on Github. I'm always interested in any good ideas anyone might have for future improvements, so shoot them my way if you got 'em.
+If you have issues, general comments, or feature requests, contact me at misterazrael1@gmail.com for a faster response time if you don't feel like submitting an issue here on Github. I'm always interested in any good ideas anyone might have for future improvements, so shoot them my way if you got 'em.
 
 
 Disclaimers:
