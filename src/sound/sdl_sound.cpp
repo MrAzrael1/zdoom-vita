@@ -242,7 +242,6 @@ public:
 		if(!cb || bytes<unit || rate<=0 || rate>192000) return NULL;
 		PCMStream *stream=new PCMStream(this,cb,bytes,flags,rate,ud);
 		streams.push_back(stream);
-		I_VitaTrace("[Vita] Audio: synth stream %d Hz, flags=%d\n",rate,flags);
 		return stream;
 	}
 	SoundStream *OpenStream(FileReader *reader,int) {
@@ -263,8 +262,6 @@ public:
 				I_VitaTrace("[Vita] Music: unsupported or invalid digital stream\n");
 				return NULL;
 			}
-			I_VitaTrace("[Vita] Music: digital stream %d Hz, %d channels, %ld compressed bytes\n",
-				decoder->rate,decoder->channels,length);
 			std::unique_ptr<DigitalStream> stream(new DigitalStream(this,decoder.get()));
 			decoder.release();
 			streams.push_back(stream.get());

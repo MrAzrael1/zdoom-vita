@@ -101,34 +101,11 @@ SDL mixer. The current compressed track is retained in RAM (maximum 64 MiB),
 with a small PCM block rather than a fully decoded song. Mono/stereo sources
 up to 192 kHz use the existing output-rate conversion. MIDI is unchanged.
 
-Distance culling (v0.13.0 testing): Vita Settings has an archived On/Off toggle
-(default Off) and a Cull distance slider (512 to 16384 map units, step 256,
-default 4096). Shorter distances hide more distant actor sprites and two-sided
-midtextures such as railings. Actor scripts, collision and AI keep running.
-Solid walls, floors, ceilings, fog boundaries and fake/3D-floor geometry remain.
-Weapon/HUD sprites and the automap are unaffected. This is an experimental
-visual tradeoff; distant enemies and decorations can disappear while enabled.
-Actor distance is measured in 3D from the current render camera with an actor
-radius allowance. Midtextures use a conservative XY segment bound, retaining
-long walls that pass near the camera. This is not a full world draw-distance cap.
 
-World distance limit (v0.13.0 pass05): an additional Vita Settings toggle,
-default Off, shares the Cull distance slider. It closes eligible distant wall
-openings with dark boundaries using the normal one-sided-wall occlusion path.
-This can reduce world rendering behind those boundaries and also enables
-sprite/midtexture distance filtering. Nearby geometry, HUD, collision and actor
-logic remain active. It is an experimental visual cutoff, not a fog effect or
-an exact spherical far plane: long segments and excluded geometry may extend
-beyond the selected distance. Mirrors, skybox views, special lines, polyobjects,
-deep water and 3D-floor sectors are excluded from boundary creation.
-Startup Console is always enabled; the temporary launcher toggle was removed.
-Old startup_console values are ignored and removed when launcher settings save.
-
-3D world detail (v0.13.0 pass06): choose Full (100%, default), Medium (75%) or
-Low (50%) in Vita Settings. Percentages apply to both dimensions of the 3D
-render, relative to the existing Render size setting. HUD, weapon, console and
-menus keep the selected framebuffer resolution. At 480x272 and a fullscreen
-view, the world becomes 360x204 or 240x136 before enlargement. Culling is not
-required. Use identical map position, clock, Render size and culling settings
-when comparing detail modes. Check custom HUDs, weapons, looking up/down and
-camera textures as well as FPS.
+Release v0.13.0 keeps the standard software renderer and render-size presets.
+The experimental culling and separate 3D-world detail controls are deferred.
+The original ZDoom startup screen is always enabled. Temporary startup-console
+preferences in launcher.cfg are ignored.
+Digital music supports Ogg Vorbis and MP3 through incremental decoding; routine
+stream-creation diagnostics are omitted. Verbose Logging remains available for
+support and is Off by default.

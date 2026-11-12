@@ -106,21 +106,9 @@ void FSoftwareRenderer::PrecacheTexture(FTexture *tex, int cache)
 //
 //===========================================================================
 
-#ifdef ZD_VITA
-#include "posix/vita_world_detail.inc"
-#endif
-
 void FSoftwareRenderer::RenderView(player_t *player)
 {
-#ifdef ZD_VITA
- if(!RenderVitaWorld(player)) {
-  if(!vita_worlddetail)ReleaseVitaWorld();
-  R_RenderActorView(player->mo);
-  I_VitaPerfWorldSize(viewwidth,viewheight);
- }
-#else
 	R_RenderActorView (player->mo);
-#endif
 	// [RH] Let cameras draw onto textures that were visible this frame.
 	FCanvasTextureInfo::UpdateAll ();
 }

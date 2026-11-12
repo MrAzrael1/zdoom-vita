@@ -658,3 +658,17 @@ allocation failure and exception restoration. Existing profile tests pass.
 Real Vita testing remains required for FOV, palettes, HUDs, custom weapons,
 camera textures and FPS. Suggested comparison: culling/world limit Off,
 same 480x272 framebuffer, fixed position/clock, Full vs Medium vs Low.
+
+### v0.13.0 release candidate
+
+Performance experiments are preserved on local branch
+testing/v0.13.0-performance at cc2321b. The release branch restores the standard
+renderer and removes experimental culling/detail CVARs, MENUDEF controls, scoped
+wall timing and unconditional texture-startup reports. Legacy experimental INI
+entries cannot activate experimental rendering because those CVARs are absent.
+
+Retained Ogg/MP3 streamed music, CC0 decoder licensing, unrestricted config mod
+counts, always-on original startup content, throttled startup bitmap composition,
+bounded patch-header/column-table reads, and per-probe texture header caching.
+Routine successful music stream diagnostics are removed; failures remain in
+boot-trace.log. The existing opt-in Verbose Logging support is unchanged.

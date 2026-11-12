@@ -95,17 +95,6 @@ extern fixed_t globaluclip, globaldclip;
 #define MINZ			(2048*4)
 #define BASEYCENTER 	(100)
 
-#ifdef ZD_VITA
-#include "posix/vita_distance_cull.h"
-CVAR(Bool, vita_distanceculling, false, CVAR_ARCHIVE)
-EXTERN_CVAR(Bool, vita_worldculling)
-CUSTOM_CVAR(Int, vita_culldistance, 4096, CVAR_ARCHIVE)
-{
- if(self<512)self=512;
- else if(self>16384)self=16384;
-}
-#endif
-
 EXTERN_CVAR (Bool, st_scale)
 EXTERN_CVAR(Bool, r_shadercolormaps)
 EXTERN_CVAR(Int, r_drawfuzz)
@@ -699,14 +688,6 @@ void R_ProjectSprite (AActor *thing, int fakeside, F3DFloor *fakefloor, F3DFloor
 	fx = pos.x;
 	fy = pos.y;
 	fz = pos.z + thing->GetBobOffset(r_TicFrac);
-#ifdef ZD_VITA
- // Visual-only: actor thinkers, collision and scripts are never culled.
- // Radius keeps large nearby actors whose origin is just beyond the limit.
- const bool vitaCulled=(vita_distanceculling || vita_worldculling) &&
-  VitaCull::OutsidePoint(fx,fy,fz,viewx,viewy,viewz,vita_culldistance,thing->radius);
- if(I_VitaPerfEnabled())I_VitaPerfCull(0,vitaCulled);
- if(vitaCulled)return;
-#endif
 
 	tex = NULL;
 	voxel = NULL;
@@ -1448,10 +1429,6 @@ void R_DrawPSprite (pspdef_t* psp, int pspnum, AActor *owner, fixed_t sx, fixed_
 
 void R_DrawPlayerSprites ()
 {
-#ifdef ZD_VITA
- extern bool VitaRenderingLowWorld;
- if(VitaRenderingLowWorld)return;
-#endif
 	int 		i;
 	int 		lightnum;
 	pspdef_t*	psp;

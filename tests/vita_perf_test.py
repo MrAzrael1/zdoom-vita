@@ -16,8 +16,6 @@ code=r'''
 using Uint64 = unsigned long long;
 static Uint64 clockTick=1;
 static bool enabled=true;
-static bool vita_distanceculling=false,vita_worldculling=false;
-static int vita_culldistance=4096,vita_worlddetail=0;
 bool I_VitaPerfEnabled(){return enabled;}
 Uint64 SDL_GetPerformanceCounter(){return clockTick;}
 Uint64 SDL_GetPerformanceFrequency(){return 1000;}
@@ -27,13 +25,11 @@ void I_VitaTrace(const char* fmt,...){char b[2048];va_list ap;va_start(ap,fmt);v
 '''
 code+='enum EVitaPerfStage '+enum+';\n'+s[a:b]+r'''
 int main(){
- I_VitaPerfFrame(0);assert(logs.size()==1&&logs[0].find("Cull settings: enabled=0 distance=4096")!=std::string::npos);logs.clear();
-
  // A brief expensive explosion followed by a cheaper reporting frame.
  clockTick=11; I_VitaPerfAdd(VPERF_THINKERS,1);
- clockTick=31; I_VitaPerfAdd(VPERF_SPRITE_DRAW,11);I_VitaPerfAdd(VPERF_WALLS,1);
+ clockTick=31; I_VitaPerfAdd(VPERF_SPRITE_DRAW,11);
  I_VitaPerfAdd(VPERF_PNG_LOAD,21); I_VitaPerfAdd(VPERF_SOUND_LOAD,29);
- I_VitaPerfSprites(80);I_VitaPerfCull(0,true);I_VitaPerfCull(0,false);I_VitaPerfCull(1,true);I_VitaPerfCull(2,true);
+ I_VitaPerfSprites(80);
  clockTick=51; I_VitaPerfFrame(1);
  assert(VitaPerfSlowFrames==1 && VitaPerfSpritesWorst==80);
  assert(VitaPerfWorst[VPERF_THINKERS]==10);
@@ -41,12 +37,7 @@ int main(){
  clockTick=4993; I_VitaPerfAdd(VPERF_SPRITE_DRAW,4991);
  I_VitaPerfSprites(3);
  clockTick=5001; I_VitaPerfFrame(4990);
- assert(logs.size()==8);
- assert(logs[5].find("walls/BSP=15.00")!=std::string::npos);
- assert(logs[7].find("Wall detail: setup=")!=std::string::npos);
- assert(logs[6].find("sprite candidates checked=1.0 culled=0.5")!=std::string::npos);
- assert(logs[6].find("line candidates=0.5 capped=0.5")!=std::string::npos);
- assert(VitaCullChecked[0]==0&&VitaCullRejected[1]==0);
+ assert(logs.size()==5);
  assert(logs[3].find("worst-frame PNG=10.00 sound=2.00")!=std::string::npos);
  assert(logs[1].find("peak=80")!=std::string::npos);
  assert(logs[1].find("=1/2")!=std::string::npos);
@@ -61,14 +52,6 @@ int main(){
  assert(VitaPerfFrames==0 && VitaPerfWindowStart==0);
  enabled=true; clockTick=6001; I_VitaPerfFrame(6000);
  assert(VitaPerfMaxFrame==1 && VitaPerfSpritesWorst==0);
- // A changed range is logged without verbose profiling and drops mixed windows.
- enabled=false;vita_culldistance=2048;size_t previous=logs.size();
- I_VitaPerfFrame(0);
- assert(logs.size()==previous+1&&logs.back().find("distance=2048")!=std::string::npos);
- enabled=true;vita_distanceculling=true;clockTick=7001;I_VitaPerfFrame(7000);
- assert(VitaPerfFrames==0&&logs.back().find("enabled=1")!=std::string::npos);
- I_VitaPerfCull(0,true);assert(VitaCullChecked[0]==1&&VitaCullRejected[0]==1);
- enabled=false;I_VitaPerfFrame(0);I_VitaPerfCull(0,true);assert(VitaCullChecked[0]==0);
  puts("Vita performance accumulator tests passed");
 }
 '''

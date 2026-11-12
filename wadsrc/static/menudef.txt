@@ -1770,31 +1770,15 @@ OptionValue "VitaRenderSizes"
 	3, "960x544 (1.00x)"
 }
 
-OptionValue "VitaWorldDetail"
-{
- 0, "Full (100%)"
- 1, "Medium (75%)"
- 2, "Low (50%)"
-}
-
 OptionMenu "VitaSettings"
 {
 	Title "VITA SETTINGS"
 	Option "Render size", "vita_scaling", "VitaRenderSizes"
 	StaticText "Higher resolutions will reduce FPS."
- Option "3D world detail", "vita_worlddetail", "VitaWorldDetail"
- StaticText "HUD and weapon keep full detail."
-
 	StaticText " "
 	Slider "HUD scale (%)", "vita_hudscale", 25, 150, 5, 0
 	StaticText " "
 	Option "Show FPS", "vid_fps", "OnOff"
-	StaticText " "
-	Option "Distance culling", "vita_distanceculling", "OnOff"
-	Option "World distance limit", "vita_worldculling", "OnOff"
-	Slider "Cull distance", "vita_culldistance", 512, 16384, 256, 0
-	StaticText "Distant sprites and midtextures."
-	StaticText "World limit adds dark boundaries."
 	StaticText " "
 	Option "Rear Touchpad Weapon Switch", "vita_rearweapons", "OnOff"
 	StaticText " "

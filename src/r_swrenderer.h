@@ -2,20 +2,9 @@
 #define __R_SWRENDERER_H
 
 #include "r_renderer.h"
-#ifdef ZD_VITA
-#include "posix/vita_world_detail.h"
-class DSimpleCanvas;
-#endif
 
 struct FSoftwareRenderer : public FRenderer
 {
-#ifdef ZD_VITA
- DSimpleCanvas *VitaWorldCanvas=NULL;
- FVitaWorldScaler VitaWorldScaler;
- virtual ~FSoftwareRenderer();
- void ReleaseVitaWorld();
- bool RenderVitaWorld(player_t *player);
-#endif
 	// Can be overridden so that the colormaps for sector color/fade won't be built.
 	virtual bool UsesColormap() const;
 

@@ -10,7 +10,7 @@ def function(text,name):
   end+=1
  return text[start:end]
 current=(root/'src/textures/patchtexture.cpp').read_text()
-old=subprocess.check_output(['git','show','HEAD:src/textures/patchtexture.cpp'],cwd=root).decode()
+old=subprocess.check_output(['git','show','v0.12.0:src/textures/patchtexture.cpp'],cwd=root).decode()
 reader=(root/'src/posix/vita_texture_reader.h').read_text().replace('#include "files.h"','')
 code=r'''
 #include <cstdio>
