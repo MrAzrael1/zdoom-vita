@@ -36,8 +36,8 @@ extra arguments. The last IWAD is retained; explicitly load a saved config
 to restore its IWAD and mod list.
 Config files are in ux0:data/zdoom-vita/configs/. Saving an existing name replaces
 its IWAD and full mod list. Older modlist-only files remain
-readable and leave the IWAD unchanged. Each config allows eight archives/folders
-and one DEH/BEX patch entry; folder contents are handled by the engine.
+readable and leave the IWAD unchanged. Configs have no fixed archive/folder count limit and allow
+one DEH/BEX patch entry; folder contents are handled by the engine.
 
 Front touch selects files/folders and launches. Selection order determines load
 order; deselect/reselect to move an entry to the end. DeHackEd/BEX patches use
@@ -95,3 +95,40 @@ New commands: idkfa (weapons/ammo/armor/keys/backpack), idfa (same without keys)
 Holding X on a folder passes it directly to ZDoom as -file, preserving unpacked-PK3 behavior. Loose resources are scanned recursively. WADs at the selected folder root are opened as embedded archives in engine filename order. Arbitrary nested WADs are not all automatically opened; the engine also recognizes its existing archive-named-folder special case. PK3/ZIP archives inside the selected folder are not opened automatically in 2.8.1: select those separately in Mods. A folder is not an automatic batch modlist; use Configs for explicit ordering. No recursive PK3 autoload was added.
 
 The basic VGA startup console now uses the full 960x544 screen; special Heretic/Hexen/Strife startup artwork retains its previous proportions.
+
+Digital music: Ogg Vorbis and MP3 songs are decoded incrementally through the
+SDL mixer. The current compressed track is retained in RAM (maximum 64 MiB),
+with a small PCM block rather than a fully decoded song. Mono/stereo sources
+up to 192 kHz use the existing output-rate conversion. MIDI is unchanged.
+
+Distance culling (v0.13.0 testing): Vita Settings has an archived On/Off toggle
+(default Off) and a Cull distance slider (512 to 16384 map units, step 256,
+default 4096). Shorter distances hide more distant actor sprites and two-sided
+midtextures such as railings. Actor scripts, collision and AI keep running.
+Solid walls, floors, ceilings, fog boundaries and fake/3D-floor geometry remain.
+Weapon/HUD sprites and the automap are unaffected. This is an experimental
+visual tradeoff; distant enemies and decorations can disappear while enabled.
+Actor distance is measured in 3D from the current render camera with an actor
+radius allowance. Midtextures use a conservative XY segment bound, retaining
+long walls that pass near the camera. This is not a full world draw-distance cap.
+
+World distance limit (v0.13.0 pass05): an additional Vita Settings toggle,
+default Off, shares the Cull distance slider. It closes eligible distant wall
+openings with dark boundaries using the normal one-sided-wall occlusion path.
+This can reduce world rendering behind those boundaries and also enables
+sprite/midtexture distance filtering. Nearby geometry, HUD, collision and actor
+logic remain active. It is an experimental visual cutoff, not a fog effect or
+an exact spherical far plane: long segments and excluded geometry may extend
+beyond the selected distance. Mirrors, skybox views, special lines, polyobjects,
+deep water and 3D-floor sectors are excluded from boundary creation.
+Startup Console is always enabled; the temporary launcher toggle was removed.
+Old startup_console values are ignored and removed when launcher settings save.
+
+3D world detail (v0.13.0 pass06): choose Full (100%, default), Medium (75%) or
+Low (50%) in Vita Settings. Percentages apply to both dimensions of the 3D
+render, relative to the existing Render size setting. HUD, weapon, console and
+menus keep the selected framebuffer resolution. At 480x272 and a fullscreen
+view, the world becomes 360x204 or 240x136 before enlargement. Culling is not
+required. Use identical map position, clock, Render size and culling settings
+when comparing detail modes. Check custom HUDs, weapons, looking up/down and
+camera textures as well as FPS.

@@ -81,19 +81,43 @@ protected:
 //
 //==========================================================================
 
+#ifdef ZD_VITA
+static bool CheckIfPatch(FileReader & file)
+{
+ // A patch's identity depends only on its header and column offsets. Reading
+ // pixel data (or an entire sound lump) cannot strengthen this check.
+ const long length=file.GetLength();
+ if(length<13)return false;
+ BYTE header[8];
+ if(file.Seek(0,SEEK_SET)!=0 || file.Read(header,8)!=8)return false;
+ const int width=short(unsigned(header[0])|(unsigned(header[1])<<8));
+ const int height=short(unsigned(header[2])|(unsigned(header[3])<<8));
+ if(height<=0 || height>2048 || width<=0 || width>2048 || width>=length/4)return false;
+ DWORD offsets[2048];
+ if(file.Read(offsets,width*4)!=width*4)return false;
+ bool gapAtStart=true;
+ for(int x=0;x<width;++x) {
+  DWORD offset=LittleLong(offsets[x]);
+  if(offset==DWORD(width*4+8))gapAtStart=false;
+  else if(offset>=DWORD(length))return false;
+ }
+ return !gapAtStart;
+}
+
+#else
 static bool CheckIfPatch(FileReader & file)
 {
 	if (file.GetLength() < 13) return false;	// minimum length of a valid Doom patch
-	
+
 	BYTE *data = new BYTE[file.GetLength()];
 	file.Seek(0, SEEK_SET);
 	file.Read(data, file.GetLength());
-	
+
 	const patch_t *foo = (const patch_t *)data;
-	
+
 	int height = LittleShort(foo->height);
 	int width = LittleShort(foo->width);
-	
+
 	if (height > 0 && height <= 2048 && width > 0 && width <= 2048 && width < file.GetLength()/4)
 	{
 		// The dimensions seem like they might be valid for a patch, so
@@ -102,7 +126,7 @@ static bool CheckIfPatch(FileReader & file)
 		// and none of them must point past the end of the patch.
 		bool gapAtStart = true;
 		int x;
-	
+
 		for (x = 0; x < width; ++x)
 		{
 			DWORD ofs = LittleLong(foo->columnofs[x]);
@@ -122,6 +146,8 @@ static bool CheckIfPatch(FileReader & file)
 	delete [] data;
 	return false;
 }
+
+#endif
 
 //==========================================================================
 //

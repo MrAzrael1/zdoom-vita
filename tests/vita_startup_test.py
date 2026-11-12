@@ -1,4 +1,4 @@
-﻿"""Run the actual Vita startup adapter against deterministic assets/audio/display."""
+"""Run the actual Vita startup adapter against deterministic assets/audio/display."""
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
@@ -15,8 +15,9 @@ code=r'''
 #include <cstdio>
 #include "posix/vita_startup_pixels.h"
 using Uint32=uint32_t;
-static Uint32 ticks=0;
-Uint32 SDL_GetTicks(){return ticks+=100;}
+static Uint32 ticks=0;static bool freezeClock=false,visible=true;static int consoleBuilds=0;
+Uint32 SDL_GetTicks(){return freezeClock?ticks:ticks+=100;}
+bool I_VitaStartupVisible(){return visible;}
 struct String:std::string {
  using std::string::string;
  String&operator=(const char*s){std::string::operator=(s);return *this;}
@@ -70,8 +71,20 @@ void Reset(){
  Wads.Add("vga-rom-font.16",4096,0x80);
 }
 '''
+inc=inc.replace(' void Console(){',' void Console(){++consoleBuilds;')
 code+=inc+r'''
 int main(){
+ Reset();
+ {FVitaStartupScreen s(100000);
+  freezeClock=true;int before=consoleBuilds,oldDraws=draws;
+  for(int i=0;i<1000;++i)s.Progress();
+  assert(consoleBuilds==before && draws==oldDraws);
+  ticks+=100;s.Progress();assert(consoleBuilds==before+1 && draws==oldDraws+1);
+  visible=false;ticks+=100;s.Progress();
+  assert(consoleBuilds==before+1 && draws==oldDraws+1);
+  visible=true;freezeClock=false;
+ }
+
  // Basic console uses original VGA glyphs, messages, title and actual progress.
  Reset();
  {FVitaStartupScreen s(4);assert(frameWidth==640&&frameHeight==400&&sink&&fullWidth);
@@ -80,6 +93,13 @@ int main(){
  assert(frame[386*640+8]==VitaStartup::Bitmap::RGB(170,170,170));
  assert(musicCalls==0&&pumps>0);}
  assert(!sink);
+ // Repeated progress after the estimated maximum must not force redraws.
+ Reset();
+ {FVitaStartupScreen s(1);freezeClock=true;s.Progress();
+  int before=consoleBuilds,oldDraws=draws;
+  for(int i=0;i<1000;++i)s.Progress();
+  assert(consoleBuilds==before && draws==oldDraws);freezeClock=false;
+ }
  // Hexen planar background, packed notches, original song and tick sounds.
  Reset();gameinfo.gametype=GAME_Hexen;
  Wads.Add("STARTUP",153648);auto &data=Wads.data.back();

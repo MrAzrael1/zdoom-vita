@@ -25,6 +25,12 @@
 
 // HEADER FILES ------------------------------------------------------------
 
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#define VITA_WORLD_TIME(stage,statement) {FVitaPerfScope timing(stage);statement;}
+#else
+#define VITA_WORLD_TIME(stage,statement) statement;
+#endif
 #include <stdlib.h>
 #include <math.h>
 
@@ -676,11 +682,11 @@ void R_EnterMirror (drawseg_t *ds, int depth)
 	WindowRight = ds->x2;
 	MirrorFlags = (depth + 1) & 1;
 
-	R_RenderBSPNode (nodes + numnodes - 1);
+	VITA_WORLD_TIME(VPERF_WALLS,R_RenderBSPNode (nodes + numnodes - 1))
 	R_3D_ResetClip(); // reset clips (floor/ceiling)
 
-	R_DrawPlanes ();
-	R_DrawSkyBoxes ();
+	VITA_WORLD_TIME(VPERF_PLANES,R_DrawPlanes ())
+	VITA_WORLD_TIME(VPERF_PLANES,R_DrawSkyBoxes ())
 
 	// Allow up to 4 recursions through a mirror
 	if (depth < 4)
@@ -798,7 +804,7 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 	}
 	// Link the polyobjects right before drawing the scene to reduce the amounts of calls to this function
 	PO_LinkToSubsectors();
-	R_RenderBSPNode (nodes + numnodes - 1);	// The head node is the last node output.
+	VITA_WORLD_TIME(VPERF_WALLS,R_RenderBSPNode (nodes + numnodes - 1))	// The head node is the last node output.
 	R_3D_ResetClip(); // reset clips (floor/ceiling)
 	camera->renderflags = savedflags;
 	WallCycles.Unclock();
@@ -808,8 +814,8 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 	if (viewactive)
 	{
 		PlaneCycles.Clock();
-		R_DrawPlanes ();
-		R_DrawSkyBoxes ();
+		VITA_WORLD_TIME(VPERF_PLANES,R_DrawPlanes ())
+		VITA_WORLD_TIME(VPERF_PLANES,R_DrawSkyBoxes ())
 		PlaneCycles.Unclock();
 
 		// [RH] Walk through mirrors
@@ -822,7 +828,7 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 		NetUpdate ();
 		
 		MaskedCycles.Clock();
-		R_DrawMasked ();
+		VITA_WORLD_TIME(VPERF_MASKED,R_DrawMasked ())
 		MaskedCycles.Unclock();
 
 		NetUpdate ();

@@ -6,6 +6,7 @@ void I_VitaStartupImage(const unsigned int *pixels,int width,int height,bool ful
 void I_VitaStartupSetSink(void (*sink)(const char*));
 void I_VitaStartupReplay(void (*sink)(const char*));
 void I_VitaStartupBegin();
+bool I_VitaStartupVisible();
 void I_VitaStartupPrint(const char *text);
 void I_VitaStartupEnd();
 bool I_VitaLauncher(DArgs *args);

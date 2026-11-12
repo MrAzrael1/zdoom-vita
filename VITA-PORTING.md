@@ -448,3 +448,213 @@ Audited Selection::Arguments, FDirectory traversal, CheckEmbedded and FWadCollec
 Vita directory traversal now checks stat return values before using the structure, skips non-regular files, and preserves already-found resources when a child directory cannot be opened. Empty directories skip PostProcessArchive to avoid indexing an empty lump array. Regression tests run the real traversal/Open/CheckEmbedded code against nested resources, WAD/PK3 names, missing paths, a dangling link, a FIFO, a simulated unreadable child and an empty folder under sanitizers.
 
 Startup image presentation gains an explicit full-width mode for the basic console: its 640x400 source now fills 960x544. Special art remains aspect preserved. Existing startup/launcher sanitizer tests verify full-width edge coverage and art borders. Vita build and VPK checks passed; hardware layout confirmation remains pending.
+
+
+### Post-v0.12.0 testing: digital music and larger configs
+
+Implemented OpenStream for Ogg Vorbis and MP3 using existing stb_vorbis and
+pinned CC0 minimp3. FileReader ownership includes failure paths; readers may
+represent a WAD lump or a PK3 entry. One compressed song (maximum 64 MiB) stays
+in memory; decoded PCM is bounded to 2048 frames. Decoding runs in the existing
+game-thread mixer, never SDL's audio thread. This is incremental PCM decoding,
+not asynchronous disk streaming. Existing queued-audio starvation under long
+game-thread stalls remains possible. Mono/stereo sample rates up to 192 kHz
+use the existing resampling path. Looping fills across EOF without zero padding;
+non-looping final blocks retain their actual length. Pause, stop, restart,
+volume and position seeking use the standard SoundStream interface.
+
+Removed the eight-archive config validation and nine-entry text parser cap.
+The launcher file catalog no longer stops at 512 entries. Ordered WAD/PK3/
+folder lists now have no fixed count cap; memory and the engine still impose
+practical limits. One explicit DEH/BEX patch, duplicate detection and the
+16-level directory traversal guard remain. Existing configs remain readable.
+
+Host regressions cover 600-entry config roundtrip and arguments, incremental
+decoding of all 80 privately supplied DoomMetal tracks (78 Vorbis, two MP3),
+mixer integration, rate conversion, EOF, short loops, pause and seeking.
+Private music fixtures are not packaged. Hardware testing is still required.
+
+
+### v0.13.0 pass01: texture initialization timing and bounded startup redraw
+
+Begins 0.13.0 testing, retaining the previous digital-music and unlimited-config
+work. Texture initialization now collects startup-only timings independently of
+vita_profile. It writes one batched [Vita] TexInit report after measured work:
+total, registration stages, nested probe open/identify costs, and eight slowest
+archives and texture probes. Candidate payload sizes describe the lengths of
+probed resources, not bytes actually read. Nested probe times overlap stage
+totals and must not be added to them. The bounded probe timer is inactive during
+normal gameplay; no per-texture logging occurs. No texture formats, lookup
+ordering or registration rules changed in this pass.
+
+The native startup adapter previously rebuilt the whole VGA bitmap on every
+Progress/Print call, even when presentation was throttled. Console composition
+now happens only when a frame is presented (at most 10 Hz except explicit status
+and first-completion updates). Repeated progress beyond the estimated maximum
+no longer forces every frame. The launcher Startup Console Off choice also skips
+native bitmap composition and progress artwork updates; audio pumping remains.
+This corrects a source of overhead, not proof of the remaining Texman bottleneck.
+
+Regression tests cover frozen-clock progress floods, completion floods, hidden
+startup presentation, original startup art/audio, bounded timing reports and
+launcher persistence. Collect boot-trace.log using the same problematic load
+order, Vita clock and storage for comparisons. Verbose Logging can remain Off.
+Nothing in this testing pass is published.
+
+### v0.13.0 pass02: cached image probes and bounded patch identification
+
+Hardware pass01 report: Texman.Init 40,791 ms, with 29,666 ms nested format
+identification and 7,876 ms reader opening. Sprites took 15,717 ms and loose
+graphics 21,663 ms. Slowest individual probes included sound resources.
+These are startup costs, not a measurement of game rendering performance.
+
+Vita image probes now use a short-lived 4096-byte reader prefix. Repeated format
+header reads/seeks use that prefix; reads beyond it fall back to the same
+underlying lump. Complete lump length, seek origin and read position semantics
+are retained. Cached PK3 entries avoid prefix copying. The cache is discarded
+when each texture probe finishes; it is not a persistent texture cache.
+
+The Vita Doom-patch validator now reads only the eight-byte header followed by
+the bounded column-offset table (at most 8192 bytes). It retains the original
+dimensions, bounds and gap-at-start checks, with explicit rejection of truncated
+directories. Pixel data is not part of this format check and is still decoded
+normally when needed. Native non-Vita patch recognition remains unchanged.
+Format order, texture override order and graphics lookup rules are unchanged.
+
+ASan/UBSan differential tests cover 11,240 recognition cases from randomized data,
+shareware/Freedoom, AUGER;ZENITH and the private music WAD. Reader tests cover
+cached and fallback reads, relative/end seeks, overflow rejection and repeated
+header probes without new source reads. The music-WAD patch-check fixture reads
+205,159,811 bytes with the old checker versus 327,680 with the cached checker;
+this is a host I/O-count comparison, not a measured Vita speedup. New TexInit
+reports use actual line breaks. Hardware timing comparison is required.
+
+### v0.13.0 pass03: optional sprite and midtexture distance culling
+
+Added archived vita_distanceculling=false and vita_culldistance=4096, clamped to
+512..16384. Vita Settings exposes the toggle and a 256-unit slider. This first
+pass deliberately retains opaque world geometry and its visibility processing.
+
+Actor culling occurs in R_ProjectSprite after position interpolation, before
+texture selection and sprite projection. The point check uses current render
+viewx/y/z and actor radius; it does not alter thinkers, scripts, collision,
+particles, weapon/HUD sprites or map data. Camera coordinates also follow
+renderer portal/mirror views. Large custom art can still visibly pop at a cutoff.
+
+Masked-midtexture culling uses the nearest point on the segment's XY bounding
+box, not its endpoint distances. This conservatively retains diagonal/long
+segments passing near the view. Culled ranges still finish render-style state
+and consume/restore sprite clipping through the original clearfog path. Fog
+boundaries and fake-wall rendering keep their original paths. Opaque walls,
+planes, BSP traversal and gameplay remain unchanged. No speedup is claimed
+before hardware measurements; maps dominated by solid geometry or thinkers may
+gain little from this feature.
+
+ASan/UBSan tests check exact boundaries, radius allowance, full fixed-coordinate
+extremes, 100000 conservative random cases, the actual CVAR clamp body and
+extracted masked-range cleanup branches including fog/3D-floor restoration.
+Vita menu restoration tests pass. Compare the same AUGER;ZENITH view at Off,
+4096 and 2048 with the same resolution and clock. The pass02 loading fixes and
+earlier music/config work are retained. This testing build is not published.
+
+### v0.13.0 pass04: verify culling and locate remaining frame cost
+
+The supplied pass03 AUGER;ZENITH log contains no gameplay Perf reports, so it
+cannot establish whether culling was enabled or quantify its effect. Added
+one Cull settings trace on first frame and subsequent toggle/range changes,
+independent of Verbose Logging. Detailed per-frame accumulators remain gated
+by vita_profile; no per-sprite trace output is written.
+
+Verbose reports now include sprite candidates checked/rejected and masked-range
+passes checked/rejected per frame. These are projection candidates/render
+passes, not unique visible actors/walls: some rejected actors would also fail
+later frustum tests. Compare with the existing final sprite-pass count and
+timings. Toggle/range changes discard the partial profiling window, preventing
+mixed culling settings within one report. Existing disabled-profile resets also
+clear culling counters.
+
+Added walls/BSP, planes/skies and masked-render scope timings around the main and
+mirror render entry calls. These are nested measurements and may overlap with
+sprite/sky/portal work; do not add them to total render time. Culling behavior
+and range settings are otherwise unchanged from pass03.
+
+ASan/UBSan tests verify count averages, report/reset behavior, setting changes
+without verbose profiling, distance bounds and fog/3D-floor cleanup. For a Vita
+comparison enable Launcher Options > Verbose Logging, use the same render size
+and clock, remain at the same map position/view for 15 seconds with culling Off,
+then at 2048 and 512. Close the options menu during each observation. Supply
+boot-trace.log afterward. No automatic performance gain is claimed.
+
+### v0.13.0 pass05: experimental opaque world boundaries; always-on startup
+
+Added archived vita_worldculling=false, exposed as World distance limit in
+Vita Settings. It uses the existing shared range and conservative segment
+bounding-box test, independently of the older distance-culling toggle.
+
+For eligible far segments, R_AddLine temporarily presents a NULL render back
+sector and a scoped VitaFarWall flag. R_NewWall marks plane extents as usual
+but skips texture/light preparation; R_RenderSegLoop fills only the clipped
+wall band with palette black and closes its columns. The existing solidseg
+clip path can then reject geometry behind the cap. Sprite clipping uses the
+ordinary one-sided drawseg silhouette. Decals are omitted on caps. No linedef,
+sector or collision data is modified. Scoped state is restored on early exit
+and exceptions. Disabling this option restores the normal rendering paths.
+
+Boundary creation is restricted to the main view, fake3D==0, non-special static
+linedefs and sectors without heightsec or 3D floors. Mirrors, skyboxes and
+polyobjects retain normal behavior. Existing long segments may extend beyond
+the range. Near floor/ceiling planes still rasterize to the chosen wall boundary;
+this is geometry-aligned occlusion, not exact distance-plane clipping or fog.
+
+World On also filters distant sprites and midtextures. Profiling logs world
+state and line-candidate caps alongside existing counts, and resets a window
+when the world toggle changes. Candidate caps can be subsequently rejected by
+normal screen occlusion and are not unique visible walls. Hardware tests must
+assess dark-boundary appearance, clipping and frame time, especially slopes,
+sector transitions and custom maps. No performance gain is claimed yet.
+
+Removed the Startup Console launcher option, persistence key and runtime gate.
+The native startup renderer and pass01 redraw fixes remain. A legacy saved Off
+value no longer suppresses startup presentation. Tests cover the old-key
+migration, single-row Options tab, boundary eligibility, nested/exception state
+restoration, clipped pixel writes and retained floor/ceiling extents. Prior
+culling, profile and menu tests also pass. No publication.
+
+### v0.13.0 pass06: independent 3D-world detail and wall timing
+
+Added archived vita_worlddetail presets 0=Full, 1=75%, 2=50%, default Full.
+The software renderer owns a reusable fixed GC-root canvas, resized on demand
+and explicitly destroyed when returning to Full or deleting the renderer.
+Lower presets scale the full-screen dimensions and ST_Y together, invoking
+the standard window/projection setup at those dimensions. This retains the
+screen aspect/FOV model for status-bar and smaller-view layouts; standard
+viewport integer alignment still applies.
+
+Only the 3D pass uses this smaller canvas. PSprite drawing is suppressed during
+that pass; framebuffer geometry, pitch, freelook and render target are restored
+before paletted nearest-neighbor enlargement into the original view rectangle.
+Player weapon sprites then draw once using the full-size projection, in the
+normal pre-camera-update/deferred-2D order. The later HUD, menu, console,
+automap and blend stages retain their normal framebuffer dimensions. All
+world geometry remains enabled unless independent culling settings are used.
+
+The enlargement helper caches horizontal sample indices across frames and
+copies repeated output rows. No full RGB intermediate is allocated. Setup,
+restoration and enlargement have a dedicated timing stage so their overhead
+can be assessed. The Full path uses the original renderer. Scoped cleanup
+restores framebuffer state and unlocks the canvas after recoverable exceptions.
+Automap-only and nested-canvas contexts use the normal rendering path.
+
+Added nested R_NewWall setup and R_RenderSegLoop draw/plane-mark timers, plus
+world dimensions/detail in the performance report. World detail changes reset
+the measurement window. Reused the already resolved one-sided midtexture in
+wall light setup instead of performing an identical second animated lookup;
+two-sided and missing-texture cases keep the original lookup.
+
+ASan/UBSan tests exercise actual orchestration with a fake canvas, 250
+nearest-neighbor reference comparisons, both detail modes, screenblocks
+8/10/11/12, full-size weapon placement, untouched framebuffer borders,
+allocation failure and exception restoration. Existing profile tests pass.
+Real Vita testing remains required for FOV, palettes, HUDs, custom weapons,
+camera textures and FPS. Suggested comparison: culling/world limit Off,
+same 480x272 framebuffer, fixed position/clock, Full vs Medium vs Low.

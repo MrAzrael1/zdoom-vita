@@ -58,10 +58,17 @@
 #include "info.h"
 #include "r_state.h"
 #include "posix/vita_debug.h"
+#include "posix/vita_texture_startup.h"
 #endif
 
 
 FTextureManager TexMan;
+#ifdef ZD_VITA
+FVitaTextureStartupStats VitaTextureStartup;
+#define VITA_TEXTURE_TIME(phase,statement) {FVitaTexturePhase timing(FVitaTextureStartupStats::phase);statement;}
+#else
+#define VITA_TEXTURE_TIME(phase,statement) statement
+#endif
 #ifdef ZD_VITA
 CVAR(Bool, vita_precacheeffects, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 #endif
@@ -822,25 +829,28 @@ void FTextureManager::AddTexturesForWad(int wadnum)
 	FirstTextureForFile.Push(firsttexture);
 
 	// First step: Load sprites
-	AddGroup(wadnum, ns_sprites, FTexture::TEX_Sprite);
+	VITA_TEXTURE_TIME(Sprites,AddGroup(wadnum, ns_sprites, FTexture::TEX_Sprite);)
 
 	// When loading a Zip, all graphics in the patches/ directory should be
 	// added as well.
-	AddGroup(wadnum, ns_patches, FTexture::TEX_WallPatch);
+	VITA_TEXTURE_TIME(Patches,AddGroup(wadnum, ns_patches, FTexture::TEX_WallPatch);)
 
 	// Second step: TEXTUREx lumps
-	LoadTextureX(wadnum);
+	VITA_TEXTURE_TIME(ClassicWalls,LoadTextureX(wadnum);)
 
 	// Third step: Flats
-	AddGroup(wadnum, ns_flats, FTexture::TEX_Flat);
+	VITA_TEXTURE_TIME(Flats,AddGroup(wadnum, ns_flats, FTexture::TEX_Flat);)
 
 	// Fourth step: Textures (TX_)
-	AddGroup(wadnum, ns_newtextures, FTexture::TEX_Override);
+	VITA_TEXTURE_TIME(Overrides,AddGroup(wadnum, ns_newtextures, FTexture::TEX_Override);)
 
 	// Sixth step: Try to find any lump in the WAD that may be a texture and load as a TEX_MiscPatch
 	int firsttx = Wads.GetFirstLump(wadnum);
 	int lasttx = Wads.GetLastLump(wadnum);
 
+#ifdef ZD_VITA
+	Uint64 looseStart=VitaTextureStartup.Clock();
+#endif
 	for (int i= firsttx; i <= lasttx; i++)
 	{
 		bool skin = false;
@@ -899,14 +909,17 @@ void FTextureManager::AddTexturesForWad(int wadnum)
 		}
 	}
 
+#ifdef ZD_VITA
+	VitaTextureStartup.Add(FVitaTextureStartupStats::LooseGraphics,looseStart);
+#endif
 	// Check for text based texture definitions
-	LoadTextureDefs(wadnum, "TEXTURES");
-	LoadTextureDefs(wadnum, "HIRESTEX");
+	VITA_TEXTURE_TIME(Definitions,LoadTextureDefs(wadnum, "TEXTURES");)
+	VITA_TEXTURE_TIME(Definitions,LoadTextureDefs(wadnum, "HIRESTEX");)
 
 	// Seventh step: Check for hires replacements.
-	AddHiresTextures(wadnum);
+	VITA_TEXTURE_TIME(Hires,AddHiresTextures(wadnum);)
 
-	SortTexturesByType(firsttexture, Textures.Size());
+	VITA_TEXTURE_TIME(Sort,SortTexturesByType(firsttexture, Textures.Size());)
 }
 
 //==========================================================================
@@ -973,6 +986,9 @@ void FTextureManager::SortTexturesByType(int start, int end)
 
 void FTextureManager::Init()
 {
+#ifdef ZD_VITA
+	VitaTextureStartup.Reset();
+#endif
 	DeleteAll();
 	SpriteFrames.Clear();
 	// Init Build Tile data if it hasn't been done already
@@ -982,16 +998,26 @@ void FTextureManager::Init()
 	// Texture 0 is a dummy texture used to indicate "no texture"
 	AddTexture (new FDummyTexture);
 
+#ifdef ZD_VITA
+ VitaTextureStartup.Add(FVitaTextureStartupStats::Setup,VitaTextureStartup.begin);
+#endif
 	int wadcnt = Wads.GetNumWads();
 	for(int i = 0; i< wadcnt; i++)
 	{
+#ifdef ZD_VITA
+  Uint64 wadStart=VitaTextureStartup.Clock();
+#endif
 		AddTexturesForWad(i);
+#ifdef ZD_VITA
+  VitaTextureStartup.Slowest(VitaTextureStartup.slowWads,VitaTextureStartup.wadCount,i,
+   VitaTextureStartup.Milliseconds(VitaTextureStartup.Clock()-wadStart));
+#endif
 	}
 
 	// Add one marker so that the last WAD is easier to handle and treat
 	// Build tiles as a completely separate block.
 	FirstTextureForFile.Push(Textures.Size());
-	InitBuildTiles ();
+	VITA_TEXTURE_TIME(Build,InitBuildTiles ();)
 	FirstTextureForFile.Push(Textures.Size());
 
 	DefaultTexture = CheckForTexture ("-NOFLAT-", FTexture::TEX_Override, 0);
@@ -1023,11 +1049,32 @@ void FTextureManager::Init()
 		}
 	}
 
-	InitAnimated();
-	InitAnimDefs();
-	FixAnimations();
-	InitSwitchList();
-	InitPalettedVersions();
+	VITA_TEXTURE_TIME(Animations,InitAnimated();)
+	VITA_TEXTURE_TIME(Animations,InitAnimDefs();)
+	VITA_TEXTURE_TIME(Animations,FixAnimations();)
+	VITA_TEXTURE_TIME(Switches,InitSwitchList();)
+	VITA_TEXTURE_TIME(Paletted,InitPalettedVersions();)
+
+#ifdef ZD_VITA
+ double total=VitaTextureStartup.Milliseconds(VitaTextureStartup.Clock()-VitaTextureStartup.begin);
+ VitaTextureStartup.active=false; // Report only after all measured texture work.
+ FString report;
+ report.AppendFormat("[Vita] TexInit: total=%.1f ms textures=%u probes=%u accepted=%u candidate-payload=%llu KiB\n",
+  total,Textures.Size(),VitaTextureStartup.probes,VitaTextureStartup.accepted,VitaTextureStartup.payloadBytes/1024);
+ const char *phases[]={"setup","sprites","patches","classic-walls","flats","overrides","loose-graphics",
+  "definitions","hires","sort","build","animations","switches","paletted","probe-open (nested)","probe-identify (nested)"};
+ for(int n=0;n<FVitaTextureStartupStats::Count;++n)
+  if(VitaTextureStartup.calls[n])report.AppendFormat("[Vita] TexInit: %s=%.1f ms calls=%u\n",
+   phases[n],VitaTextureStartup.phases[n],VitaTextureStartup.calls[n]);
+ for(int n=0;n<VitaTextureStartup.wadCount;++n)
+  report.AppendFormat("[Vita] TexInit: archive=%.1f ms %s\n",VitaTextureStartup.slowWads[n].ms,
+   Wads.GetWadFullName(VitaTextureStartup.slowWads[n].index));
+ for(int n=0;n<VitaTextureStartup.lumpCount;++n)
+  report.AppendFormat("[Vita] TexInit: probe=%.1f ms %s\n",VitaTextureStartup.slowLumps[n].ms,
+   Wads.GetLumpFullName(VitaTextureStartup.slowLumps[n].index));
+
+ I_VitaTraceBlock(report.GetChars(),report.Len());
+#endif
 }
 
 //==========================================================================

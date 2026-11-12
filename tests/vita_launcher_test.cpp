@@ -316,9 +316,21 @@ int main(int argc,char**argv){
  events.push_back(square);Key(SDLK_F5);assert(I_VitaLauncher(&saveButtonProtected)&&Configs().size()==1);
  std::vector<VitaLauncher::File> limits;
  std::vector<std::string> mods;
- for(int i=0;i<9;++i){std::string path="test"+std::to_string(i)+".pk3";limits.push_back({path,false});mods.push_back(path);}
- assert(!VitaLauncher::ValidateConfig(mods,limits,message));
- mods.pop_back();assert(VitaLauncher::ValidateConfig(mods,limits,message));
+ for(int i=0;i<600;++i){std::string path="ux0:data/zdoom-vita/pwad/test"+std::to_string(i)+".pk3";limits.push_back({path,false});mods.push_back(path);}
+ assert(VitaLauncher::ValidateConfig(mods,limits,message));
+ VitaLauncher::Selection largeConfig;largeConfig.iwad=configSelection.iwad;largeConfig.mods=mods;
+ assert(WriteConfig("Large Config",largeConfig,message));
+ stored.clear();savedGame.clear();
+ assert(ReadConfig("Large Config.txt",stored,message,&savedGame));
+ assert(stored.size()==600 && stored==mods && savedGame==largeConfig.iwad);
+ assert(largeConfig.Arguments().size()==603);
+ std::filesystem::create_directories("ux0:data/zdoom-vita/pwad/bulk");
+ for(int i=0;i<600;++i)Write("ux0:data/zdoom-vita/pwad/bulk/"+std::to_string(i)+".pk3","zip");
+ std::vector<VitaLauncher::File> largeCatalog;bool largeLimited=false;
+ Scan(PwadRoot,"",0,false,largeCatalog,largeLimited);
+ assert(largeCatalog.size()>=600 && !largeLimited);
+ std::filesystem::remove_all("ux0:data/zdoom-vita/pwad/bulk");
+ std::filesystem::remove("ux0:data/zdoom-vita/configs/Large Config.txt");
  limits.push_back({"one.deh",false});limits.push_back({"two.bex",false});
  mods.push_back("one.deh");assert(VitaLauncher::ValidateConfig(mods,limits,message));
  mods.push_back("two.bex");assert(!VitaLauncher::ValidateConfig(mods,limits,message));
@@ -385,6 +397,15 @@ int main(int argc,char**argv){
  DArgs savedOff;Reset();Key(SDLK_RIGHT);Key(SDLK_RIGHT);Key(SDLK_RIGHT);
  Key(SDLK_F5);assert(I_VitaLauncher(&savedOff));
  assert(I_VitaLauncherProfile(profile) && !profile);
+ // Old startup_console=0 is ignored: startup presentation is always available.
+ Write("ux0:data/zdoom-vita/launcher.cfg","startup_console=0\n");
+ VitaLauncher::Selection legacyConsole;Load(legacyConsole);Save(legacyConsole);
+ {std::ifstream saved("ux0:data/zdoom-vita/launcher.cfg");
+  std::string text((std::istreambuf_iterator<char>(saved)),{});
+  assert(text.find("startup_console=")==std::string::npos);
+ }
+
+ I_VitaStartupBegin();assert(StartupWindow && StartupRenderer);I_VitaStartupEnd();
  // Startup console joins fragmented engine output, wraps and bounds history.
  I_VitaStartupBegin();
  I_VitaStartupPrint("W_Init: Init ");

@@ -53,10 +53,95 @@ int Printf(const char*,...){return 0;}
 FISoundChannel *S_GetChannel(void*s){auto*c=new FISoundChannel();c->SysChannel=s;channels.push_back(c);return c;}
 void S_ChannelEnded(FISoundChannel*c){c->SysChannel=NULL;++ended;}
 float S_GetRolloff(FRolloffInfo*,float,bool){return 1;}
+// Minimal FileReader implementation for the in-memory stream ownership tests.
+FileReader::FileReader():File(NULL),Length(0),StartPos(0),FilePos(0),CloseOnDestruct(false){}
+FileReader::~FileReader(){}
+long FileReader::Tell()const{return FilePos;}
+long FileReader::Seek(long,int){return -1;}
+long FileReader::Read(void*,long){return 0;}
+char *FileReader::Gets(char*,int){return NULL;}
+struct MusicReader : FileReader {
+ std::vector<BYTE> bytes;
+ MusicReader(const std::string&path){
+  std::ifstream f(path,std::ios::binary);
+  bytes.assign(std::istreambuf_iterator<char>(f),{});
+  Length=bytes.size();
+ }
+ long Seek(long n,int origin) {
+  long p=origin==SEEK_SET?n:origin==SEEK_CUR?FilePos+n:Length+n;
+  if(p<0 || p>Length)return -1;FilePos=p;return 0;
+ }
+ long Read(void*out,long n){
+  n=std::min(n,Length-FilePos);memcpy(out,bytes.data()+FilePos,n);FilePos+=n;return n;
+ }
+};
 static void Drain(){queuedBytes=0;queued.clear();}
 static bool Synth(SoundStream*,void*b,int n,void*u){++*(int*)u;float*p=(float*)b;for(int i=0;i<n/4;++i)p[i]=.25f;return true;}
+struct TinyMusic : VitaMusicDecoder {
+ int position=0,total;
+ TinyMusic(int hz,int ch,int n):total(n){rate=hz;channels=ch;}
+ int Read(short *out,int requested) {
+  int got=std::min(requested,total-position);
+  for(int i=0;i<got*channels;++i)out[i]=1000;
+  position+=got;return got;
+ }
+ bool Seek(unsigned ms){position=int(static_cast<unsigned long long>(ms)*rate/1000);return position<=total;}
+};
+static void CheckDigitalLifecycle() {
+ for(int rate:{22050,44100,48000,96000})for(int ch:{1,2}) {
+  DigitalStream music(NULL,new TinyMusic(rate,ch,17003));
+  assert(music.Play(false,.5f));float l=0,r=0;int frames=0;
+  while(music.ReadFrame(l,r)){assert(l>0 && l==r);++frames;}
+  assert(std::abs(frames-int(std::ceil(17003.0*OutputRate/rate)))<=1);
+  assert(music.IsEnded());
+  assert(music.Play(true,1));music.SetPaused(true);assert(!music.ReadFrame(l,r));
+  music.SetPaused(false);assert(music.ReadFrame(l,r));
+  assert(music.SetPosition(100));assert(music.ReadFrame(l,r));
+  music.Stop();assert(music.IsEnded()&&!music.ReadFrame(l,r));
+ }
+ DigitalStream tiny(NULL,new TinyMusic(44100,1,3));
+ assert(tiny.Play(true,1));float l,r;
+ for(int i=0;i<10000;++i)assert(tiny.ReadFrame(l,r)&&l>0&&l==r);
+ DigitalStream empty(NULL,new TinyMusic(44100,1,0));
+ assert(empty.Play(true,1));assert(!empty.ReadFrame(l,r)&&empty.IsEnded());
+ puts("PASS: digital EOF, restart, mono/stereo rate conversion, seek, tiny loops and empty-loop guard");
+}
 int main(int argc,char **argv){
+ CheckDigitalLifecycle();
  auto*r=CreateSDLSoundRenderer();assert(r->IsValid());
+ if(argc==3 && std::string(argv[1])=="--music") {
+  std::ifstream list(argv[2]);std::string path;unsigned tracks=0;
+  while(list>>path) {
+   MusicReader input(path);std::vector<BYTE> encoded=input.bytes;
+   std::unique_ptr<VitaMusicDecoder> decoder(VitaOpenMusic(encoded));
+   assert(decoder && decoder->rate==44100 && decoder->channels==2);
+   short block[8192];unsigned long long frames=0,energy=0;int got;
+   while((got=decoder->Read(block,4096))>0){
+    frames+=got;for(int i=0;i<got*2;++i)energy+=std::abs(int(block[i]));
+   }
+   assert(frames>44100 && energy>0);
+   assert(decoder->Seek(0) && decoder->Read(block,4096)>0);
+   assert(decoder->Seek(1000) && decoder->Read(block,4096)>0);
+   auto *music=r->OpenStream(new MusicReader(path),SoundStream::Loop);
+   assert(music && music->Play(true,1));
+   Drain();r->UpdateSounds();
+   bool audible=false;
+   for(int attempt=0;attempt<60 && !audible;++attempt) {
+    for(short v:queued)if(v)audible=true;
+    if(!audible){Drain();r->UpdateSounds();}
+   }
+   if(!audible)fprintf(stderr,"Silent music: %s\n",path.c_str());
+   assert(audible);
+   music->SetPaused(true);Drain();r->UpdateSounds();for(short v:queued)assert(!v);
+   assert(music->SetPosition(1000));music->SetPaused(false);
+   Drain();r->UpdateSounds();assert(!music->IsEnded());
+   music->Stop();delete music;Drain();++tracks;
+  }
+  assert(tracks==80);
+  BYTE invalid[]={0,1,2,3};std::vector<BYTE> junk(invalid,invalid+4);
+  assert(!VitaOpenMusic(junk));assert(!r->OpenStream((FileReader*)NULL,0));
+  printf("PASS: %u supplied Ogg/MP3 songs fully decoded; seek, mixing, pause and teardown\n",tracks);
+ }
  if(argc==2) {
   std::ifstream manifest(argv[1]);std::string path;int rate,chans,play;
   unsigned count=0;

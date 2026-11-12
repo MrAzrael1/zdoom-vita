@@ -33,8 +33,14 @@
 **
 */
 
+#ifdef ZD_VITA
+#include "posix/vita_texture_startup.h"
+#endif
 #include "doomtype.h"
 #include "files.h"
+#ifdef ZD_VITA
+#include "posix/vita_texture_reader.h"
+#endif
 #include "w_wad.h"
 #include "templates.h"
 #include "i_system.h"
@@ -98,15 +104,29 @@ FTexture * FTexture::CreateTexture (int lumpnum, int usetype)
 
 	if (lumpnum == -1) return NULL;
 
+#ifdef ZD_VITA
+ FVitaTextureProbe vitaProbe(lumpnum,Wads.LumpLength(lumpnum));
+#endif
 	FWadLump data = Wads.OpenLumpNum (lumpnum);
+#ifdef ZD_VITA
+ FVitaTextureReader buffered(data);
+ FileReader &probeData=buffered;
+ vitaProbe.Opened();
+#endif
 
+#ifndef ZD_VITA
+ FileReader &probeData=data;
+#endif
 	for(size_t i = 0; i < countof(CreateInfo); i++)
 	{
 		if ((CreateInfo[i].usetype == usetype || CreateInfo[i].usetype == TEX_Any))
 		{
-			FTexture * tex = CreateInfo[i].TryCreate(data, lumpnum);
+			FTexture * tex = CreateInfo[i].TryCreate(probeData, lumpnum);
 			if (tex != NULL) 
 			{
+#ifdef ZD_VITA
+				vitaProbe.Accepted();
+#endif
 				tex->UseType = usetype;
 				if (usetype == FTexture::TEX_Flat) 
 				{

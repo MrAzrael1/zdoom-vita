@@ -2,6 +2,7 @@
 // thread; SDL consumes queued PCM on its audio thread.
 #include <SDL.h>
 #include <vector>
+#include <memory>
 #include <cmath>
 #include <cstring>
 #include "i_sound.h"
@@ -47,7 +48,7 @@ public:
 		buffer.resize(frames * channels * bytesPerSample);
 		cursor = frames;
 	}
-	bool Play(bool, float vol) { volume=vol; active=true; paused=false; ended=false; cursor=frames; playedFrames=0; return true; }
+	virtual bool Play(bool, float vol) { volume=vol; active=true; paused=false; ended=false; cursor=frames; playedFrames=0; return true; }
 	void Stop() { active=false; ended=true; }
 	void SetVolume(float vol) { volume=vol; }
 	bool SetPaused(bool value) { paused=value; return true; }
@@ -83,6 +84,42 @@ public:
 		++playedFrames;
 		return true;
 	}
+};
+
+// Decoding stays on the game thread; SDL only consumes queued PCM.
+class DigitalStream : public PCMStream {
+ VitaMusicDecoder *decoder;
+ bool looping;
+ static bool Fill(SoundStream *base,void *out,int bytes,void*) {
+  DigitalStream *self=static_cast<DigitalStream*>(base);
+  short *pcm=static_cast<short*>(out);
+  int capacity=bytes/(2*self->channels),got=0;
+  bool rewoundWithoutProgress=false;
+  while(got<capacity) {
+   int n=self->decoder->Read(pcm+got*self->channels,capacity-got);
+   if(n>0){got+=n;rewoundWithoutProgress=false;continue;}
+   if(!self->looping || rewoundWithoutProgress || !self->decoder->Seek(0))break;
+   rewoundWithoutProgress=true;
+  }
+  self->frames=got; // No padded silence at EOF, including short tracks.
+  return got>0;
+ }
+public:
+ DigitalStream(SDLSoundRenderer *renderer,VitaMusicDecoder *source):
+  PCMStream(renderer,Fill,4096*source->channels,source->channels==1?Mono:0,source->rate,NULL),
+  decoder(source),looping(false) {}
+ ~DigitalStream(){delete decoder;}
+ bool Play(bool loop,float vol) {
+  if(!decoder->Seek(0))return false;
+  looping=loop;frames=int(buffer.size())/(channels*bytesPerSample);
+  return PCMStream::Play(loop,vol);
+ }
+ bool SetPosition(unsigned milliseconds) {
+  if(!decoder->Seek(milliseconds))return false;
+  frames=int(buffer.size())/(channels*bytesPerSample);cursor=frames;
+  playedFrames=static_cast<unsigned long long>(milliseconds)*OutputRate/1000;
+  ended=false;return true;
+ }
 };
 
 class SDLSoundRenderer : public SoundRenderer {
@@ -208,9 +245,35 @@ public:
 		I_VitaTrace("[Vita] Audio: synth stream %d Hz, flags=%d\n",rate,flags);
 		return stream;
 	}
-	// Callback streams handle the bundled MIDI/MUS synthesizers. Compressed
-	// digital music is a separate milestone requiring a decoder library.
-	SoundStream *OpenStream(FileReader *reader,int) { delete reader; return NULL; }
+	SoundStream *OpenStream(FileReader *reader,int) {
+		// Keep compressed music, not a fully expanded song. FileReader can
+		// represent a WAD range or a decompressed PK3 entry.
+		std::unique_ptr<FileReader> input(reader);
+		if(!reader)return NULL;
+		long length=reader->GetLength();
+		if(length<4 || length>64*1024*1024) {
+			I_VitaTrace("[Vita] Music: rejected compressed stream size %ld\n",length);
+			return NULL;
+		}
+		try {
+			std::vector<unsigned char> encoded(length);
+			if(reader->Seek(0,SEEK_SET)!=0 || reader->Read(encoded.data(),length)!=length)return NULL;
+			std::unique_ptr<VitaMusicDecoder> decoder(VitaOpenMusic(encoded));
+			if(!decoder) {
+				I_VitaTrace("[Vita] Music: unsupported or invalid digital stream\n");
+				return NULL;
+			}
+			I_VitaTrace("[Vita] Music: digital stream %d Hz, %d channels, %ld compressed bytes\n",
+				decoder->rate,decoder->channels,length);
+			std::unique_ptr<DigitalStream> stream(new DigitalStream(this,decoder.get()));
+			decoder.release();
+			streams.push_back(stream.get());
+			return stream.release();
+		} catch(const std::bad_alloc&) {
+			I_VitaTrace("[Vita] Music: insufficient memory for compressed stream\n");
+			return NULL;
+		}
+	}
 	FISoundChannel *StartSound(SoundHandle sound,float vol,int pitch,int flags,FISoundChannel *reuse) {
 		if(!sound.data) return NULL;
 		Voice *voice=NULL;

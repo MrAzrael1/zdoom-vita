@@ -27,7 +27,9 @@ class FVitaStartupScreen : public FTTYStartupScreen {
   out.resize(size);Wads.ReadLump(n,&out[0]);return true;
  }
  void Draw(bool force=false){
+  if(!I_VitaStartupVisible())return;
   if(!force&&drawn&&SDL_GetTicks()-lastDraw<100)return;
+  if(style==FStartupInfo::DoomStartup)Console();
   drawn=true;lastDraw=SDL_GetTicks();
   I_VitaStartupImage(&image.pixels[0],image.width,image.height,style==FStartupInfo::DoomStartup);
  }
@@ -71,7 +73,7 @@ class FVitaStartupScreen : public FTTYStartupScreen {
     }
     if(*p>=32)lines.back()+=char(*p);else if(*p=='\t')lines.back()+=' ';
    }
-   Console();Draw();
+   Draw();
   }
   Pump();
  }
@@ -114,7 +116,7 @@ public:
    }
   }
   if(style==FStartupInfo::DoomStartup){
-   image.Resize(640,400);image.TextPalette();lines.push_back("");Console();
+   image.Resize(640,400);image.TextPalette();lines.push_back("");
   }
   active=this;
   graphical=style!=FStartupInfo::DoomStartup || !font.empty();
@@ -130,13 +132,14 @@ public:
   I_VitaStartupEnd();
  }
  void Progress(){
+  bool finishedNow=CurPos<MaxPos && CurPos+1==MaxPos;
   if(CurPos<MaxPos)++CurPos;
   if(!musicAttempted&&(style==FStartupInfo::HexenStartup || DoomStartupInfo.Song.IsNotEmpty())){
    musicAttempted=true;
    const char *song=DoomStartupInfo.Song.IsNotEmpty()?DoomStartupInfo.Song.GetChars():"orb";
    musicStarted=S_ChangeMusic(song,0,true,true);
   }
-  if(!graphical){Pump();return;}
+  if(!graphical || !I_VitaStartupVisible()){Pump();return;}
   if(MaxPos>0){
    if(style==FStartupInfo::HexenStartup){
     int pos=CurPos*32/MaxPos;
@@ -152,9 +155,9 @@ public:
    }else if(style==FStartupInfo::StrifeStartup){
     int pos=CurPos*184/MaxPos;
     if(pos!=NotchPos&&!(pos&1)){Strife(NotchPos,pos);NotchPos=pos;}
-   }else Console();
+   }
   }
-  Draw(CurPos==MaxPos);Pump();
+  Draw(finishedNow);Pump();
  }
  void LoadingStatus(const char *message,int colors){
   if(style==FStartupInfo::HereticStartup && statusY<24){

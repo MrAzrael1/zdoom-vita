@@ -56,6 +56,14 @@
 #define WALLYREPEAT 8
 
 
+#ifdef ZD_VITA
+#include "posix/vita_distance_cull.h"
+#include "posix/vita_perf.h"
+EXTERN_CVAR(Bool, vita_distanceculling)
+EXTERN_CVAR(Bool, vita_worldculling)
+EXTERN_CVAR(Int, vita_culldistance)
+#endif
+
 CVAR(Bool, r_np2, true, 0)
 
 //CVAR (Int, ty, 8, 0)
@@ -234,6 +242,15 @@ void R_RenderMaskedSegRange (drawseg_t *ds, int x1, int x2)
 	sprflipvert = false;
 
 	curline = ds->curline;
+#ifdef ZD_VITA
+ const bool cullMidtexture=(vita_distanceculling || vita_worldculling) && ds->maskedtexturecol!=-1 &&
+  VitaCull::OutsideSegment(curline->v1->x,curline->v1->y,curline->v2->x,curline->v2->y,
+   viewx,viewy,vita_culldistance);
+ if(ds->maskedtexturecol!=-1 && I_VitaPerfEnabled())I_VitaPerfCull(1,cullMidtexture);
+#else
+ const bool cullMidtexture=false;
+#endif
+
 
 	// killough 4/11/98: draw translucent 2s normal textures
 	// [RH] modified because we don't use user-definable translucency maps
@@ -246,6 +263,10 @@ void R_RenderMaskedSegRange (drawseg_t *ds, int x1, int x2)
 	{
 		return;
 	}
+
+ // Finish render-style state and mark this range consumed even when culled.
+ // Keep fog partitions and fake/3D-floor boundaries on their existing paths.
+ if(cullMidtexture && !ds->bFogBoundary && !ds->bFakeBoundary)goto clearfog;
 
 	NetUpdate ();
 
@@ -297,7 +318,7 @@ void R_RenderMaskedSegRange (drawseg_t *ds, int x1, int x2)
 			goto clearfog;
 		}
 	}
-	if ((ds->bFakeBoundary && !(ds->bFakeBoundary & 4)) || drawmode == DontDraw)
+	if ((ds->bFakeBoundary && !(ds->bFakeBoundary & 4)) || drawmode == DontDraw || cullMidtexture)
 	{
 		goto clearfog;
 	}
@@ -1766,6 +1787,9 @@ void transmaskwallscan (int x1, int x2, short *uwal, short *dwal, fixed_t *swal,
 
 void R_RenderSegLoop ()
 {
+#ifdef ZD_VITA
+ FVitaPerfScope vitaWallPhase(VPERF_WALL_DRAW);
+#endif
 	int x1 = rw_x;
 	int x2 = rw_stopx;
 	int x;
@@ -1851,6 +1875,18 @@ void R_RenderSegLoop ()
 	}
 	if(fake3D & 7) return;
 
+#ifdef ZD_VITA
+ if(VitaFarWall) {
+  // Plane extents were marked above, so nearby floors/ceilings remain drawn.
+  // Fill only the clipped wall band, then seal the column as a one-sided wall.
+  if(viewactive)for(int column=x1;column<x2;++column)
+   for(int row=walltop[column];row<wallbottom[column];++row)
+    dc_destorg[ylookup[row]+column]=GPalette.BlackIndex;
+  clearbufshort(ceilingclip+x1,x2-x1,viewheight);
+  clearbufshort(floorclip+x1,x2-x1,0xffff);
+  return;
+ }
+#endif
 	// draw the wall tiers
 	if (midtexture)
 	{ // one sided line
@@ -1987,6 +2023,9 @@ void R_RenderSegLoop ()
 
 void R_NewWall (bool needlights)
 {
+#ifdef ZD_VITA
+ FVitaPerfScope vitaWallPhase(VPERF_WALL_SETUP);
+#endif
 	fixed_t rowoffset, yrepeat;
 
 	rw_markmirror = false;
@@ -2004,6 +2043,9 @@ void R_NewWall (bool needlights)
 		// single sided line
 		// a single sided line is terminal, so it must mark ends
 		markfloor = markceiling = true;
+#ifdef ZD_VITA
+  if(!VitaFarWall)
+#endif
 		// [RH] Render mirrors later, but mark them now.
 		if (linedef->special != Line_Mirror || !r_drawmirrors)
 		{
@@ -2283,7 +2325,12 @@ void R_NewWall (bool needlights)
 		}
 	}
 
-	FTexture *midtex = TexMan(sidedef->GetTexture(side_t::mid), true);
+#ifdef ZD_VITA
+ if(VitaFarWall){rw_lightleft=rw_lightstep=0;return;}
+#endif
+ // A one-sided wall already resolved its animated midtexture above.
+ // Reuse that result; other cases retain the original lookup behavior.
+ FTexture *midtex = midtexture ? midtexture : TexMan(sidedef->GetTexture(side_t::mid), true);
 
 	segtextured = midtex != NULL || toptexture != NULL || bottomtexture != NULL;
 
@@ -2617,6 +2664,9 @@ void R_StoreWallRange (int start, int stop)
 	}
 
 	// [RH] Draw any decals bound to the seg
+#ifdef ZD_VITA
+ if(!VitaFarWall)
+#endif
 	for (DBaseDecal *decal = curline->sidedef->AttachedDecals; decal != NULL; decal = decal->WallNext)
 	{
 		R_RenderDecal (curline->sidedef, decal, ds_p, 0);

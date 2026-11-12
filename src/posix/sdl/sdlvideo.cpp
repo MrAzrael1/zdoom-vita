@@ -889,6 +889,10 @@ ADD_STAT (blit)
 
 #ifdef ZD_VITA
 CVAR(Bool, vita_profile, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+EXTERN_CVAR(Bool, vita_distanceculling)
+EXTERN_CVAR(Bool, vita_worldculling)
+EXTERN_CVAR(Int, vita_worlddetail)
+EXTERN_CVAR(Int, vita_culldistance)
 bool I_VitaPerfEnabled() { return vita_profile; }
 // Nested timings overlap: thinkers are part of game, sprites are part of render.
 // Keep the slowest frame's breakdown as well as averages; explosions are brief.
@@ -896,6 +900,19 @@ static Uint64 VitaPerfTotals[VPERF_COUNT], VitaPerfCurrent[VPERF_COUNT];
 static Uint64 VitaPerfWorst[VPERF_COUNT], VitaPerfWindowStart, VitaPerfMaxFrame;
 static unsigned VitaPerfFrames, VitaPerfSlowFrames, VitaPerfSpritesCurrent;
 static unsigned VitaPerfSpritesTotal, VitaPerfSpritesPeak, VitaPerfSpritesWorst;
+static int VitaPerfWorldWidth,VitaPerfWorldHeight;
+void I_VitaPerfWorldSize(int width,int height){VitaPerfWorldWidth=width;VitaPerfWorldHeight=height;}
+
+static unsigned long long VitaCullChecked[3],VitaCullRejected[3];
+static int VitaCullLastEnabled=-1,VitaCullLastDistance=-1,VitaCullLastWorld=-1,VitaLastDetail=-1;
+void I_VitaPerfCull(unsigned kind,bool culled)
+{
+ if(I_VitaPerfEnabled() && kind<3){
+  ++VitaCullChecked[kind];
+  if(culled)++VitaCullRejected[kind];
+ }
+}
+
 void I_VitaPerfAdd(EVitaPerfStage stage, Uint64 start)
 {
 	if (start)
@@ -911,8 +928,18 @@ void I_VitaPerfSprites(unsigned count)
 }
 void I_VitaPerfFrame(Uint64 start)
 {
+ // Configuration changes are rare and logged even without verbose timing.
+ // Reset a timing window on a change rather than mixing two culling settings.
+ if(VitaCullLastEnabled!=int(vita_distanceculling) || VitaCullLastDistance!=int(vita_culldistance) || VitaCullLastWorld!=int(vita_worldculling) || VitaLastDetail!=int(vita_worlddetail)) {
+  VitaCullLastEnabled=int(vita_distanceculling);VitaCullLastDistance=int(vita_culldistance);VitaCullLastWorld=int(vita_worldculling);VitaLastDetail=int(vita_worlddetail);
+  I_VitaTrace("[Vita] Cull settings: enabled=%d distance=%d map units world=%d detail=%d\n",VitaCullLastEnabled,VitaCullLastDistance,VitaCullLastWorld,VitaLastDetail);
+  start=0;
+ }
+
 	if (!start)
 	{
+		memset(VitaCullChecked,0,sizeof(VitaCullChecked));
+		memset(VitaCullRejected,0,sizeof(VitaCullRejected));
 		memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
 		memset(VitaPerfCurrent, 0, sizeof(VitaPerfCurrent));
 		VitaPerfWindowStart = VitaPerfMaxFrame = 0;
@@ -962,6 +989,18 @@ void I_VitaPerfFrame(Uint64 start)
 	I_VitaTrace("[Vita] Audio work: effects=%.2f synth=%.2f ms/frame; worst-frame effects=%.2f synth=%.2f ms\n",
 		VitaPerfTotals[VPERF_EFFECT_MIX]*ms, VitaPerfTotals[VPERF_SYNTH]*ms,
 		VitaPerfWorst[VPERF_EFFECT_MIX]*tickms, VitaPerfWorst[VPERF_SYNTH]*tickms);
+ I_VitaTrace("[Vita] Render detail: walls/BSP=%.2f planes/skies=%.2f masked=%.2f ms/frame (nested in render)\n",
+  VitaPerfTotals[VPERF_WALLS]*ms,VitaPerfTotals[VPERF_PLANES]*ms,VitaPerfTotals[VPERF_MASKED]*ms);
+ I_VitaTrace("[Vita] Cull work: enabled=%d distance=%d; sprite candidates checked=%.1f culled=%.1f; masked passes checked=%.1f culled=%.1f; world=%d line candidates=%.1f capped=%.1f per frame\n",
+  int(vita_distanceculling),int(vita_culldistance),
+  double(VitaCullChecked[0])/VitaPerfFrames,double(VitaCullRejected[0])/VitaPerfFrames,
+  double(VitaCullChecked[1])/VitaPerfFrames,double(VitaCullRejected[1])/VitaPerfFrames,
+  int(vita_worldculling),double(VitaCullChecked[2])/VitaPerfFrames,double(VitaCullRejected[2])/VitaPerfFrames);
+ memset(VitaCullChecked,0,sizeof(VitaCullChecked));
+ memset(VitaCullRejected,0,sizeof(VitaCullRejected));
+ I_VitaTrace("[Vita] Wall detail: setup=%.2f draw/plane-mark=%.2f world-scale=%.2f ms/frame; world=%dx%d detail=%d (nested timings)\n",
+  VitaPerfTotals[VPERF_WALL_SETUP]*ms,VitaPerfTotals[VPERF_WALL_DRAW]*ms,VitaPerfTotals[VPERF_WORLD_SCALE]*ms,
+  VitaPerfWorldWidth,VitaPerfWorldHeight,int(vita_worlddetail));
 	memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
 	VitaPerfFrames = VitaPerfSlowFrames = VitaPerfSpritesTotal = VitaPerfSpritesPeak = 0;
 	VitaPerfMaxFrame = 0; VitaPerfWindowStart = now;

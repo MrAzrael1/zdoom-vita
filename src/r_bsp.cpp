@@ -102,6 +102,21 @@ seg_t *ActiveWallMirror;
 TArray<size_t> WallMirrors;
 
 static subsector_t *InSubsector;
+#ifdef ZD_VITA
+#include "posix/vita_distance_cull.h"
+#include "posix/vita_perf.h"
+CVAR(Bool, vita_worldculling, false, CVAR_ARCHIVE)
+EXTERN_CVAR(Int, vita_culldistance)
+bool VitaFarWall=false;
+// Nested render calls and early exits must never leak a virtual back sector.
+struct FVitaFarWallGuard {
+ bool saved;sector_t *back;bool replaced;
+ FVitaFarWallGuard():saved(VitaFarWall),back(NULL),replaced(false){VitaFarWall=false;}
+ void Close(){back=backsector;replaced=true;backsector=NULL;VitaFarWall=true;}
+ ~FVitaFarWallGuard(){if(replaced)backsector=back;VitaFarWall=saved;}
+};
+#endif
+
 
 CVAR (Bool, r_drawflat, false, 0)		// [RH] Don't texture segs?
 
@@ -520,6 +535,9 @@ sector_t *R_FakeFlat(sector_t *sec, sector_t *tempsec,
 
 void R_AddLine (seg_t *line)
 {
+#ifdef ZD_VITA
+ FVitaFarWallGuard vitaBoundary;
+#endif
 	static sector_t tempsec;	// killough 3/8/98: ceiling/water hack
 	bool			solid;
 	fixed_t			tx1, tx2, ty1, ty2;
@@ -575,6 +593,18 @@ void R_AddLine (seg_t *line)
 	{
 		backsector = line->backsector;
 	}
+#ifdef ZD_VITA
+ // Conservative first pass: ordinary static geometry in the main view only.
+ // Closing a far opening uses the real one-sided wall/plane clipping pipeline.
+ if(vita_worldculling && !fake3D && !MirrorFlags && !ActiveWallMirror && CurrentSkybox==0 &&
+  line->linedef->special==0 && !(line->sidedef->Flags&WALLF_POLYOBJ) &&
+  !frontsector->heightsec && (!backsector || !backsector->heightsec) &&
+  (!frontsector->e || !frontsector->e->XFloor.ffloors.Size()) &&
+  (!backsector || !backsector->e || !backsector->e->XFloor.ffloors.Size()) &&
+  VitaCull::OutsideSegment(line->v1->x,line->v1->y,line->v2->x,line->v2->y,
+   viewx,viewy,vita_culldistance))vitaBoundary.Close();
+ if(I_VitaPerfEnabled())I_VitaPerfCull(2,VitaFarWall);
+#endif
 	rw_frontcz1 = frontsector->ceilingplane.ZatPoint (line->v1->x, line->v1->y);
 	rw_frontfz1 = frontsector->floorplane.ZatPoint (line->v1->x, line->v1->y);
 	rw_frontcz2 = frontsector->ceilingplane.ZatPoint (line->v2->x, line->v2->y);

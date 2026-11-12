@@ -7,6 +7,24 @@
 #include <stdio.h>
 #include <string.h>
 
+// Write a preformatted startup report with one open/close, without the
+// per-message formatting buffer limit. Callers supply the exact byte count.
+static inline void I_VitaTraceBlock(const char *text, int length)
+{
+ if (!text || length<=0) return;
+ SceUID file=sceIoOpen("ux0:data/zdoom-vita/boot-trace.log",
+  SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND,0777);
+ if(file>=0) {
+  int written=0;
+  while(written<length) {
+   int result=sceIoWrite(file,text+written,length-written);
+   if(result<=0)break;
+   written+=result;
+  }
+  sceIoClose(file);
+ }
+}
+
 static inline void I_VitaTrace(const char *format, ...)
 {
 	char text[1024];

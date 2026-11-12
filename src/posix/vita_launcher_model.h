@@ -92,7 +92,7 @@ inline bool ParseArguments(const std::string &text,std::vector<std::string> &out
  out.swap(parsed);return true;
 }
 inline bool ValidateConfig(const std::vector<std::string> &mods,const std::vector<File> &files,std::string &error) {
- unsigned archives=0,patches=0;
+ unsigned patches=0;
  std::vector<std::string> seen;
  for(const std::string &path:mods) {
   bool directory=false;
@@ -100,8 +100,8 @@ inline bool ValidateConfig(const std::vector<std::string> &mods,const std::vecto
   if(!directory && !IsModExtension(path)){error="CONFIG CONTAINS AN UNSUPPORTED FILE";return false;}
   size_t dot=path.find_last_of('.');
   std::string ext=directory || dot==std::string::npos?"":Lower(path.substr(dot));
-  if(!directory && (ext==".deh" || ext==".bex"))++patches;else ++archives;
-  if(archives>8 || patches>1){error="CONFIG LIMIT: 8 MODS AND 1 DEH/BEX PATCH";return false;}
+  if(!directory && (ext==".deh" || ext==".bex"))++patches;
+  if(patches>1){error="CONFIG LIMIT: 1 DEH/BEX PATCH";return false;}
   if(std::find(seen.begin(),seen.end(),path)!=seen.end()){error="CONFIG CONTAINS A DUPLICATE MOD";return false;}
   seen.push_back(path);
   bool found=false;

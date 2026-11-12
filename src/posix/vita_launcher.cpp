@@ -19,13 +19,12 @@ const char *PwadRoot="ux0:data/zdoom-vita/pwad/";
 const int Rows=10, RowY=116, RowHeight=32;
 bool VerboseLogging=false, LauncherOptionsReady=false;
 void Scan(const std::string &root,const std::string &relative, int depth, bool wantIwad, std::vector<File> &files, bool &limited) {
- if(depth>16 || files.size()>=512){limited=true;return;}
+ if(depth>16){limited=true;return;}
  std::string directory=root+relative;
  SceUID handle=sceIoDopen(directory.c_str());
  if(handle<0){I_VitaTrace("[Vita] Launcher: cannot scan %s (%d)\n",directory.c_str(),handle);return;}
  SceIoDirent entry;
  for(;;) {
-  if(files.size()>=512){limited=true;break;}
   memset(&entry,0,sizeof(entry));
   int result=sceIoDread(handle,&entry);
   if(result<=0)break;
@@ -49,7 +48,6 @@ void Scan(const std::string &root,const std::string &relative, int depth, bool w
   }
   if(wantIwad && (!iwad || Lower(name)=="voices.wad"))continue;
   files.push_back({root+path,wantIwad});
-  if(files.size()>=512){limited=true;break;}
  }
  sceIoDclose(handle);
 }
@@ -65,7 +63,7 @@ void Load(Selection &selection, std::string *arguments=NULL,std::string *config=
   else if(strncmp(line,"iwad=",5)==0)selection.iwad=line+5;
   else if(config && strncmp(line,"config=",7)==0)*config=line+7;
   else if(arguments && strncmp(line,"args=",5)==0)*arguments=line+5;
-  else if(strncmp(line,"mod=",4)==0 && selection.mods.size()<512)selection.mods.push_back(line+4);
+  else if(strncmp(line,"mod=",4)==0)selection.mods.push_back(line+4);
  }
  fclose(f);
 }
@@ -113,7 +111,7 @@ bool ReadConfig(const std::string &filename,std::vector<std::string> &mods,std::
    if(!game.empty() || !line[5]){okay=false;break;}
    game=Resolve(line+5,true);continue;
   }
-  if(strncmp(line,"mod=",4)!=0 || loaded.size()>=9){okay=false;break;}
+  if(strncmp(line,"mod=",4)!=0){okay=false;break;}
   loaded.push_back(Resolve(line+4,false));
  }
  if(ferror(f))okay=false;
@@ -323,6 +321,7 @@ void I_VitaStartupBegin() {
  SDL_RenderSetLogicalSize(StartupRenderer,960,544);
  StartupLines.push_back("");
 }
+bool I_VitaStartupVisible(){return StartupRenderer!=NULL;}
 void I_VitaStartupSetSink(void (*sink)(const char*)) {
  StartupSink=sink;
 }
@@ -557,7 +556,7 @@ bool I_VitaLauncher(DArgs *args) {
   if(focus[tab]<top[tab])top[tab]=focus[tab];
   if(focus[tab]>=top[tab]+Rows)top[tab]=focus[tab]-Rows+1;
   Color(renderer,16,19,27);SDL_RenderClear(renderer);
-  Color(renderer,230,232,238);Text(renderer,32,22,"ZDOOM VITA 0.12.0",3);
+  Color(renderer,230,232,238);Text(renderer,32,22,"ZDOOM VITA 0.13.0",3);
   Color(renderer,139,151,175);Text(renderer,32,51,"SELECT YOUR GAME AND OPTIONAL MODS",2);
   const char *tabs[]={"IWADS","MODS","CONFIGS","OPTIONS"};
   for(int t=0;t<4;++t) {
@@ -630,7 +629,7 @@ bool I_VitaLauncher(DArgs *args) {
    Text(renderer,44,184,tab?"PUT MODS IN UX0:DATA/ZDOOM-VITA/PWAD":"PUT GAMES IN UX0:DATA/ZDOOM-VITA/IWAD",2);
   }
   Color(renderer,139,151,175);
-  Text(renderer,32,448,!notice.empty()?notice.c_str():limited?"SCAN LIMIT REACHED - FIRST 512 ENTRIES, 16 SUBFOLDER LEVELS":tab==3?"OPTIONS: X TOGGLES THE SELECTED OPTION":tab==2?"CONFIGS: X LOADS OR DISABLES A SAVED CONFIG":tab?("MODS: "+browser).c_str():"IWADS: UX0:data/zdoom-vita/iwad",2);
+  Text(renderer,32,448,!notice.empty()?notice.c_str():limited?"SCAN LIMIT REACHED - 16 SUBFOLDER LEVELS":tab==3?"OPTIONS: X TOGGLES THE SELECTED OPTION":tab==2?"CONFIGS: X LOADS OR DISABLES A SAVED CONFIG":tab?("MODS: "+browser).c_str():"IWADS: UX0:data/zdoom-vita/iwad",2);
   Text(renderer,32,475,"IWAD: "+(selection.iwad.empty()?std::string("NONE"):DisplayPath(selection.iwad)),2,52);
   Text(renderer,32,495,tab==3?"X TOGGLE - O BACK":tab==2?"SQUARE DELETES SELECTED CONFIG":tab==1?"X SELECT O BACK - HOLD X LOAD FOLDER":"MODS: "+std::to_string(selection.mods.size())+" - TRIANGLE CLEARS",2,52,tab==1?0.95:1.0);
   Color(renderer,selection.iwad.empty()?50:55,selection.iwad.empty()?50:104,selection.iwad.empty()?50:78);

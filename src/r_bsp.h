@@ -121,4 +121,8 @@ void R_RenderBSPNode (void *node);
 sector_t *R_FakeFlat(sector_t *, sector_t *, int *, int *, bool);
 
 
+#ifdef ZD_VITA
+extern bool VitaFarWall;
+#endif
+
 #endif

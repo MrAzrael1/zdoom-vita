@@ -58,3 +58,60 @@ bool VitaVorbisPCMBytes(const unsigned char *data, int length, size_t &bytes)
  stb_vorbis_close(decoder);
  return valid;
 }
+
+
+#define MINIMP3_IMPLEMENTATION
+#define MINIMP3_NO_SIMD
+#define MINIMP3_NO_STDIO
+#include "../thirdparty/minimp3_ex.h"
+namespace {
+class MusicDecoder : public VitaMusicDecoder {
+ std::vector<unsigned char> encoded;
+ stb_vorbis *ogg;
+ mp3dec_ex_t mp3;
+ bool mp3Open;
+public:
+ MusicDecoder():ogg(NULL),mp3Open(false) { memset(&mp3,0,sizeof(mp3)); }
+ ~MusicDecoder() {
+  if(ogg)stb_vorbis_close(ogg);
+  if(mp3Open)mp3dec_ex_close(&mp3);
+ }
+ bool Open(std::vector<unsigned char>&data) {
+  encoded.swap(data);
+  if(encoded.size()<4)return false;
+  if(!memcmp(encoded.data(),"OggS",4)) {
+   int error=0;
+   ogg=stb_vorbis_open_memory(encoded.data(),int(encoded.size()),&error,NULL);
+   if(!ogg)return false;
+   stb_vorbis_info info=stb_vorbis_get_info(ogg);
+   rate=info.sample_rate;channels=info.channels;
+  } else {
+   mp3Open=true; // Close any partial seek index even when opening fails.
+   if(mp3dec_ex_open_buf(&mp3,encoded.data(),encoded.size(),MP3D_SEEK_TO_SAMPLE))return false;
+   rate=mp3.info.hz;channels=mp3.info.channels;
+  }
+  return rate>0 && rate<=192000 && (channels==1 || channels==2);
+ }
+ int Read(short *pcm,int frames) {
+  if(frames<=0)return 0;
+  if(ogg)return stb_vorbis_get_samples_short_interleaved(ogg,channels,pcm,frames*channels);
+  return int(mp3dec_ex_read(&mp3,pcm,size_t(frames)*channels)/channels);
+ }
+ bool Seek(unsigned milliseconds) {
+  unsigned long long frame=static_cast<unsigned long long>(milliseconds)*rate/1000;
+  if(ogg) {
+   if(!milliseconds)return stb_vorbis_seek_start(ogg)!=0;
+   return frame<=0xffffffffULL && stb_vorbis_seek(ogg,unsigned(frame))!=0;
+  }
+  return mp3dec_ex_seek(&mp3,frame*channels)==0;
+ }
+};
+}
+VitaMusicDecoder *VitaOpenMusic(std::vector<unsigned char>&encoded) {
+ MusicDecoder *decoder=NULL;
+ try {
+  decoder=new MusicDecoder;
+  if(decoder->Open(encoded))return decoder;
+ } catch(const std::bad_alloc&) {}
+ delete decoder;return NULL;
+}
