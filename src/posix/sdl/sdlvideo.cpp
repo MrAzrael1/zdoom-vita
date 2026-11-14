@@ -93,6 +93,10 @@ struct MiniModeInfo
 	WORD Width, Height;
 };
 
+#ifdef ZD_VITA
+#include "r_draw_mt.h"
+#endif
+
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
 
 // PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
@@ -534,6 +538,9 @@ void SDLFB::Update ()
 
 	if (NotPaletted)
 	{
+		// Single-threaded on purpose: splitting this across the draw workers
+		// was measured slower on Vita (multicore pass04). The destination is
+		// the locked GPU texture, so the copy is memory-bound, not CPU-bound.
 		GPfx.Convert (MemBuffer, Pitch,
 			pixels, pitch, Width, Height,
 			FRACUNIT, FRACUNIT, 0, 0);
@@ -959,9 +966,24 @@ void I_VitaPerfFrame(Uint64 start)
 	I_VitaTrace("[Vita] Asset decode: PNG=%.2f sound=%.2f ms/frame; worst-frame PNG=%.2f sound=%.2f ms\n",
 		VitaPerfTotals[VPERF_PNG_LOAD]*ms, VitaPerfTotals[VPERF_SOUND_LOAD]*ms,
 		VitaPerfWorst[VPERF_PNG_LOAD]*tickms, VitaPerfWorst[VPERF_SOUND_LOAD]*tickms);
-	I_VitaTrace("[Vita] Audio work: effects=%.2f synth=%.2f ms/frame; worst-frame effects=%.2f synth=%.2f ms\n",
-		VitaPerfTotals[VPERF_EFFECT_MIX]*ms, VitaPerfTotals[VPERF_SYNTH]*ms,
-		VitaPerfWorst[VPERF_EFFECT_MIX]*tickms, VitaPerfWorst[VPERF_SYNTH]*tickms);
+	// Audio mixing moved to its own thread (multicore pass01), so its old
+	// EffectMix/Synth stages are no longer recorded; report draw threads here.
+	{
+		FDrawerStats ds;
+		R_DrawerTakeStats(ds);
+		double perFrame = 1.0 / VitaPerfFrames;
+		I_VitaTrace("[Vita] Draw threads: %s main-share=%d/8 worker-split=%d/%d; wait=%.2f ms/frame (worst %.2f); worker busy=%.2f/%.2f ms/frame; commands=%.0f syncs=%.1f per frame\n",
+			ds.active ? "on" : "off", ds.mainshare, ds.worker1Percent, 100 - ds.worker1Percent,
+			VitaPerfTotals[VPERF_DRAW_WAIT]*ms, VitaPerfWorst[VPERF_DRAW_WAIT]*tickms,
+			ds.busyMicros[0]/1000.0*perFrame, ds.busyMicros[1]/1000.0*perFrame,
+			ds.commands*perFrame, ds.syncs*perFrame);
+	}
+	// Game-thread time inside the 3D view (nested in render). With draw threads
+	// on, these include submitting commands but not the workers' pixel work.
+	I_VitaTrace("[Vita] Render stages: walls/BSP=%.2f planes=%.2f masked=%.2f ms/frame; worst-frame walls/BSP=%.2f planes=%.2f masked=%.2f draw-wait=%.2f ms\n",
+		VitaPerfTotals[VPERF_R_WALLS]*ms, VitaPerfTotals[VPERF_R_PLANES]*ms, VitaPerfTotals[VPERF_R_MASKED]*ms,
+		VitaPerfWorst[VPERF_R_WALLS]*tickms, VitaPerfWorst[VPERF_R_PLANES]*tickms, VitaPerfWorst[VPERF_R_MASKED]*tickms,
+		VitaPerfWorst[VPERF_DRAW_WAIT]*tickms);
 	memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
 	VitaPerfFrames = VitaPerfSlowFrames = VitaPerfSpritesTotal = VitaPerfSpritesPeak = 0;
 	VitaPerfMaxFrame = 0; VitaPerfWindowStart = now;

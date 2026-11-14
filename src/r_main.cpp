@@ -36,6 +36,10 @@
 #include "m_bbox.h"
 #include "r_local.h"
 #include "r_plane.h"
+#include "r_draw_mt.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 #include "r_bsp.h"
 #include "r_3dfloors.h"
 #include "r_sky.h"
@@ -750,6 +754,10 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 	R_SetupBuffer ();
 	R_SetupFrame (actor);
 
+	// Queue drawing to the worker cores for the rest of this view; the window
+	// is flushed when this function returns (including by exception).
+	FDrawerQueueWindow drawerWindow;
+
 	// Clear buffers.
 	R_ClearClipSegs (0, viewwidth);
 	R_ClearDrawSegs ();
@@ -798,7 +806,12 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 	}
 	// Link the polyobjects right before drawing the scene to reduce the amounts of calls to this function
 	PO_LinkToSubsectors();
+	{
+#ifdef ZD_VITA
+	FVitaPerfScope vitaWalls(VPERF_R_WALLS);	// BSP walk, clipping, wall columns
+#endif
 	R_RenderBSPNode (nodes + numnodes - 1);	// The head node is the last node output.
+	}
 	R_3D_ResetClip(); // reset clips (floor/ceiling)
 	camera->renderflags = savedflags;
 	WallCycles.Unclock();
@@ -808,8 +821,13 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 	if (viewactive)
 	{
 		PlaneCycles.Clock();
+		{
+#ifdef ZD_VITA
+		FVitaPerfScope vitaPlanes(VPERF_R_PLANES);	// floors, ceilings, skies, skyboxes
+#endif
 		R_DrawPlanes ();
 		R_DrawSkyBoxes ();
+		}
 		PlaneCycles.Unclock();
 
 		// [RH] Walk through mirrors
@@ -822,7 +840,12 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 		NetUpdate ();
 		
 		MaskedCycles.Clock();
+		{
+#ifdef ZD_VITA
+		FVitaPerfScope vitaMasked(VPERF_R_MASKED);	// sprites, masked mid-textures, particles, psprites
+#endif
 		R_DrawMasked ();
+		}
 		MaskedCycles.Unclock();
 
 		NetUpdate ();

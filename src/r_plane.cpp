@@ -54,6 +54,7 @@
 #include "g_level.h"
 #include "r_bsp.h"
 #include "r_plane.h"
+#include "r_draw_mt.h"
 #include "r_segs.h"
 #include "r_3dfloors.h"
 #include "v_palette.h"
@@ -355,6 +356,8 @@ void STACK_ARGS R_CalcTiltedLighting (fixed_t lval, fixed_t lend, int width)
 
 void R_MapTiltedPlane (int y, int x1)
 {
+	R_DrawerSync();	// writes the framebuffer directly
+
 	int x2 = spanend[y];
 	int width = x2 - x1;
 	double iz, uz, vz;
@@ -484,6 +487,8 @@ void R_MapTiltedPlane (int y, int x1)
 
 void R_MapColoredPlane (int y, int x1)
 {
+	R_DrawerSync();	// writes the framebuffer directly
+
 	memset (ylookup[y] + x1 + dc_destorg, ds_color, spanend[y] - x1 + 1);
 }
 
@@ -863,6 +868,8 @@ extern FTexture *rw_pic;
 // We need 4 skybufs because wallscan can draw up to 4 columns at a time.
 static BYTE skybuf[4][512];
 static DWORD lastskycol[4];
+static unsigned lastskygen[4];
+static BYTE *lastskyptr[4];
 static int skycolplace;
 
 // Get a column of sky when there is only one sky texture.
@@ -884,16 +891,26 @@ static const BYTE *R_GetTwoSkyColumns (FTexture *fronttex, int x)
 	DWORD skycol = (angle1 << 16) | angle2;
 	int i;
 
+	// While drawing is queued, a composite must outlive the four-entry ring
+	// (queued columns still point at it), so it comes from the frame arena.
+	// Entries are tagged with the arena generation they were built in.
+	const bool queued = R_DrawerQueueActive();
+	unsigned gen = queued ? DrawerFrameArenaGeneration * 2 + 1 : 0;
+
 	for (i = 0; i < 4; ++i)
 	{
-		if (lastskycol[i] == skycol)
+		if (lastskycol[i] == skycol && lastskygen[i] == gen)
 		{
-			return skybuf[i];
+			return lastskyptr[i];
 		}
 	}
 
+	BYTE *composite = queued ? R_DrawerFrameAlloc(512) : NULL;
+	if (composite == NULL) composite = skybuf[skycolplace];
+	else gen = DrawerFrameArenaGeneration * 2 + 1;	// allocation may have reset the arena
 	lastskycol[skycolplace] = skycol;
-	BYTE *composite = skybuf[skycolplace];
+	lastskygen[skycolplace] = gen;
+	lastskyptr[skycolplace] = composite;
 	skycolplace = (skycolplace + 1) & 3;
 
 	// The ordering of the following code has been tuned to allow VC++ to optimize

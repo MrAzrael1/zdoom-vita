@@ -58,6 +58,7 @@
 #include "p_effect.h"
 #include "r_bsp.h"
 #include "r_plane.h"
+#include "r_draw_mt.h"
 #include "r_segs.h"
 #include "r_3dfloors.h"
 #include "v_palette.h"
@@ -320,6 +321,160 @@ nextpost:
 	}
 }
 
+// ---- queued sprite columns (begin) ----
+// A whole sprite as one drawer command (multicore pass05). The game thread
+// stores each column's pixels, spans and clip limits in the frame arena; the
+// workers run the R_DrawMaskedColumn logic below and draw only their band.
+// The span arithmetic is the same as R_DrawMaskedColumn, statement for
+// statement, with dc_yl/dc_yh/dc_texturefrac held in locals.
+struct FSpriteColumn
+{
+	const BYTE *pixels;
+	const FTexture::Span *spans;
+	short floorclip, ceilingclip;	// mfloorclip[x], mceilingclip[x]
+};
+
+struct FSpriteCmd
+{
+	FColumnKernel kernel;
+	FColumnArgs base;		// colormap, blend, translation, pitch, iscale...
+	const FSpriteColumn *cols;
+	BYTE *destorg;
+	int x1, ncols;
+	fixed_t sprtopscreen, spryscale, iscale, texturemid, centeryfrac;
+	bool flip;
+};
+
+static void K_DrawSpriteColumns (const void *args, int bandBegin, int bandEnd)
+{
+	const FSpriteCmd &s = *static_cast<const FSpriteCmd *>(args);
+	const fixed_t iscale = s.iscale;
+	for (int i = 0; i < s.ncols; ++i)
+	{
+		const FSpriteColumn &col = s.cols[i];
+		const int x = s.x1 + i;
+		const FTexture::Span *span = col.spans;
+		while (span->Length != 0)
+		{
+			const int length = span->Length;
+			const int top = span->TopOffset;
+
+			// calculate unclipped screen coordinates for post
+			int yl = (s.sprtopscreen + s.spryscale * top) >> FRACBITS;
+			int yh = (s.sprtopscreen + s.spryscale * (top + length) - FRACUNIT) >> FRACBITS;
+
+			if (s.flip)
+			{
+				swapvalues (yl, yh);
+			}
+
+			if (yh >= col.floorclip)
+			{
+				yh = col.floorclip - 1;
+			}
+			if (yl < col.ceilingclip)
+			{
+				yl = col.ceilingclip;
+			}
+
+			if (yl <= yh)
+			{
+				fixed_t texturefrac;
+				if (s.flip)
+				{
+					texturefrac = (yl*iscale) - (top << FRACBITS)
+						- FixedMul (s.centeryfrac, iscale) - s.texturemid;
+					const fixed_t maxfrac = length << FRACBITS;
+					while (texturefrac >= maxfrac)
+					{
+						if (++yl > yh)
+							goto nextpost;
+						texturefrac += iscale;
+					}
+					fixed_t endfrac = texturefrac + (yh-yl)*iscale;
+					while (endfrac < 0)
+					{
+						if (--yh < yl)
+							goto nextpost;
+						endfrac -= iscale;
+					}
+				}
+				else
+				{
+					texturefrac = s.texturemid - (top << FRACBITS)
+						+ (yl*iscale) - FixedMul (s.centeryfrac-FRACUNIT, iscale);
+					while (texturefrac < 0)
+					{
+						if (++yl > yh)
+							goto nextpost;
+						texturefrac += iscale;
+					}
+					fixed_t endfrac = texturefrac + (yh-yl)*iscale;
+					const fixed_t maxfrac = length << FRACBITS;
+					if (yh < col.floorclip-1 && endfrac < maxfrac - iscale)
+					{
+						yh++;
+					}
+					else while (endfrac >= maxfrac)
+					{
+						if (--yh < yl)
+							goto nextpost;
+						endfrac -= iscale;
+					}
+				}
+				{
+					FColumnArgs a = s.base;
+					a.source = col.pixels + top;
+					a.dest = s.destorg + yl * a.pitch + x;	// ylookup[yl] + x + dc_destorg
+					a.count = yh - yl + 1;
+					a.texturefrac = texturefrac;
+					R_DrawColumnClipped (s.kernel, a, yl, bandBegin, bandEnd);
+				}
+			}
+nextpost:
+			span++;
+		}
+	}
+}
+// ---- queued sprite columns (end) ----
+
+// Submits columns [x1, x2) of a sprite as one command. Returns false (and
+// draws nothing) when queueing is off or colfunc has no queueable kernel; the
+// caller then draws the columns one by one as before.
+static bool R_SubmitSpriteColumns (FTexture *tex, fixed_t frac, fixed_t xiscale, int x1, int x2)
+{
+	static_assert(sizeof(FSpriteCmd) <= DRAWER_BANDED_ARGS_MAX, "FSpriteCmd too large for a banded command");
+	if (!R_DrawerQueueActive() || x2 <= x1) return false;
+	FColumnKernel kernel = R_GetColumnKernel (colfunc);
+	if (kernel == NULL) return false;
+	const int ncols = x2 - x1;
+	FSpriteColumn *cols = (FSpriteColumn *)R_DrawerFrameAlloc (ncols * sizeof(FSpriteColumn));
+	if (cols == NULL) return false;
+	for (int i = 0; i < ncols; ++i, frac += xiscale)
+	{
+		const FTexture::Span *spans;
+		cols[i].pixels = tex->GetColumn (frac >> FRACBITS, &spans);
+		cols[i].spans = spans;
+		cols[i].floorclip = mfloorclip[x1 + i];
+		cols[i].ceilingclip = mceilingclip[x1 + i];
+	}
+	FSpriteCmd cmd;
+	cmd.kernel = kernel;
+	R_CaptureColumnArgs (cmd.base);
+	cmd.cols = cols;
+	cmd.destorg = dc_destorg;
+	cmd.x1 = x1;
+	cmd.ncols = ncols;
+	cmd.sprtopscreen = sprtopscreen;
+	cmd.spryscale = spryscale;
+	cmd.iscale = dc_iscale;
+	cmd.texturemid = dc_texturemid;
+	cmd.centeryfrac = centeryfrac;
+	cmd.flip = sprflipvert;
+	R_SubmitBanded (K_DrawSpriteColumns, &cmd, sizeof(cmd));
+	return true;
+}
+
 //
 // R_DrawVisSprite
 //	mfloorclip and mceilingclip should also be set.
@@ -405,6 +560,13 @@ void R_DrawVisSprite (vissprite_t *vis)
 					frac += xiscale;
 				}
 				rt_draw4cols (dc_x - 4);
+			}
+
+			// While drawing is queued, the remaining columns go to the workers
+			// as a single command (stop4 == x1 then, so nothing above ran).
+			if (R_SubmitSpriteColumns (tex, frac, xiscale, dc_x, x2))
+			{
+				dc_x = x2;
 			}
 
 			while (dc_x < x2)
@@ -572,6 +734,10 @@ void R_WallSpriteColumn (void (*drawfunc)(const BYTE *column, const FTexture::Sp
 
 void R_DrawVisVoxel(vissprite_t *spr, int minslabz, int maxslabz, short *cliptop, short *clipbot)
 {
+	// Voxels mix queued columns with direct slab/offscreen writes; draw them
+	// entirely on the game thread after the queue has caught up.
+	FDrawerInlineScope inlineScope;
+
 	ESPSResult mode;
 	int flags = 0;
 
@@ -2505,6 +2671,27 @@ static void R_DrawMaskedSegsBehindParticle (const vissprite_t *vis)
 	}
 }
 
+// The particle fill loop, as a queueable kernel.
+static void K_DrawParticle (FRectArgs &A)
+{
+	BYTE *dest = A.dest;
+	int ycount = A.ycount;
+	DWORD fg = A.fg;
+	DWORD *bg2rgb = A.bg2rgb;
+
+	do
+	{
+		int count = A.countbase;
+		do
+		{
+			DWORD bg = bg2rgb[*dest];
+			bg = (fg+bg) | 0x1f07c1f;
+			*dest++ = RGB32k.All[bg & (bg>>15)];
+		} while (--count);
+		dest += A.spacing;
+	} while (--ycount);
+}
+
 void R_DrawParticle (vissprite_t *vis)
 {
 	DWORD *bg2rgb;
@@ -2534,17 +2721,14 @@ void R_DrawParticle (vissprite_t *vis)
 	spacing = RenderTarget->GetPitch() - countbase;
 	dest = ylookup[yl] + x1 + dc_destorg;
 
-	do
-	{
-		int count = countbase;
-		do
-		{
-			DWORD bg = bg2rgb[*dest];
-			bg = (fg+bg) | 0x1f07c1f;
-			*dest++ = RGB32k.All[bg & (bg>>15)];
-		} while (--count);
-		dest += spacing;
-	} while (--ycount);
+	FRectArgs args;
+	args.dest = dest;
+	args.ycount = ycount;
+	args.countbase = countbase;
+	args.spacing = spacing;
+	args.fg = fg;
+	args.bg2rgb = bg2rgb;
+	R_SubmitRect(K_DrawParticle, args, yl);
 }
 
 extern fixed_t baseyaspectmul;

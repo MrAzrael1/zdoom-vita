@@ -1785,4 +1785,9 @@ OptionMenu "VitaSettings"
 	Option "Preload effects", "vita_precacheeffects", "OnOff"
 	StaticText "(EXPERIMENTAL) MAY HELP PERFORMANCE"
 	StaticText "AT COST OF SLOWER MAP LOAD SPEEDS."
+	StaticText " "
+	Option "Multicore drawing", "vita_drawthreads", "OnOff"
+	Slider "Game thread draw share (/8)", "vita_drawmainshare", 0, 4, 1, 0
+	StaticText "(EXPERIMENTAL) DRAWS THE 3D VIEW ON CORES 1-2."
+	StaticText "SHARE 0 = WORKER CORES ONLY."
 }

@@ -43,6 +43,7 @@
 #include "doomdef.h"
 #include "r_defs.h"
 #include "r_draw.h"
+#include "r_draw_mt.h"
 #include "r_main.h"
 #include "r_things.h"
 #include "v_video.h"
@@ -842,6 +843,8 @@ void STACK_ARGS rt_tlaterevsubclamp4cols (int sx, int yl, int yh)
 // sx should be dword-aligned.
 void rt_draw4cols (int sx)
 {
+	R_DrawerSync();	// writes the framebuffer directly; normally unused while queueing
+
 	int x, bad;
 	unsigned int maxtop, minbot, minnexttop;
 
