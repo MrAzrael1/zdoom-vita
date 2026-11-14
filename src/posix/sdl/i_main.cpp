@@ -48,6 +48,8 @@
 #ifdef ZD_VITA
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
+#include <psp2/kernel/sysmem.h>
+#include <malloc.h>
 #endif
 #if defined(__MACH__) && !defined(NOASM)
 #include <sys/types.h>
@@ -245,6 +247,45 @@ static void unprotect_rtext()
 void I_StartupJoysticks();
 void I_ShutdownJoysticks();
 
+#ifdef ZD_VITA
+#ifndef ZD_VITA_HEAP_MB
+#define ZD_VITA_HEAP_MB 256
+#endif
+// Read by VitaSDK's newlib before main() to size the malloc heap, which is
+// reserved as one block and never grows. Everything ZDoom allocates (lumps,
+// textures, sounds, music, the SoundFont) lives inside it.
+extern "C" { unsigned int _newlib_heap_size_user = ZD_VITA_HEAP_MB * 1024u * 1024u; }
+
+// Map-load preload budgets for effect sprites (pixels) and effect sounds (PCM),
+// scaled to the heap: 3/8 and 3/16 of it, i.e. 96 and 48 MiB at the default
+// 256 MiB, and never below the original fixed 32 and 16 MiB. Assets chosen
+// under these budgets stay resident between maps.
+size_t I_VitaPrecacheBudget(bool pixels)
+{
+	size_t heap = _newlib_heap_size_user;
+	size_t budget = pixels ? heap / 8 * 3 : heap / 16 * 3;
+	size_t minimum = (pixels ? 32u : 16u) * 1024u * 1024u;
+	return budget < minimum ? minimum : budget;
+}
+
+// Heap use (live and high-water) against the heap size, plus what the system
+// still has free outside the heap. mallinfo walks the free lists, so call
+// this only from periodic reports.
+void I_VitaTraceMemory(const char *when)
+{
+	struct mallinfo mi = mallinfo();
+	SceKernelFreeMemorySizeInfo info;
+	info.size = sizeof(info);
+	if (sceKernelGetFreeMemorySize(&info) < 0)
+		info.size_user = info.size_cdram = info.size_phycont = -1;
+	const double mib = 1024.0 * 1024.0;
+	I_VitaTrace("[Vita] Memory%s%s: heap used=%.1f peak=%.1f of %.1f MiB; system free main=%.1f cdram=%.1f phycont=%.1f MiB\n",
+		when ? " " : "", when ? when : "",
+		mi.uordblks / mib, mi.arena / mib, _newlib_heap_size_user / mib,
+		info.size_user / mib, info.size_cdram / mib, info.size_phycont / mib);
+}
+#endif
+
 int main (int argc, char **argv)
 {
 #ifdef ZD_VITA
@@ -255,6 +296,7 @@ int main (int argc, char **argv)
 		SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
 	if (trace >= 0) sceIoClose(trace);
 	I_VitaTrace("VITA-BUILD-v0.13.0: native trace started\n");
+	I_VitaTraceMemory("at boot");
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 	FILE *log = freopen("ux0:data/zdoom-vita/startup.log", "w", stdout);
 	if (log != NULL) setvbuf(stdout, NULL, _IONBF, 0);

@@ -672,3 +672,164 @@ counts, always-on original startup content, throttled startup bitmap composition
 bounded patch-header/column-table reads, and per-probe texture header caching.
 Routine successful music stream diagnostics are removed; failures remain in
 boot-trace.log. The existing opt-in Verbose Logging support is unchanged.
+
+### v0.13.0 multicore pass01: dedicated audio thread
+
+Effect mixing, music stream callbacks (FluidSynth, Ogg/MP3, GME) and SDL queue
+top-up now run on a dedicated "zdoom-audio" thread created with a 256 KiB stack,
+high priority and Vita user core 1 affinity. The game thread is pinned to core 0.
+Both affinity results are written to boot-trace.log. The game thread only issues
+start/stop/volume/position commands and reaps finished voices, because
+S_ChannelEnded and channel bookkeeping in s_sound.cpp are not thread-safe.
+
+voiceLock guards voices, volumes and pause/inactive/sync state; streamLock guards
+the stream list and stream state and is held during stream callbacks. The two are
+never held together, so effects never wait on a synth callback. Lock order with
+music devices is streamLock -> device CritSec; no device calls back into the
+renderer while holding its CritSec (stock ZDoom ran these callbacks on FMOD's
+mixer thread). DigitalStream detaches before deleting its decoder. 3D sounds are
+started and spatialised under one lock. Queue target (~70ms), 32 voices, gain
+arithmetic and pitch behaviour are unchanged. If thread or mutex creation fails,
+mixing falls back to the game thread exactly as before.
+
+Audio-thread mixing is no longer counted in the EffectMix/Synth profile stages
+(the profiler is not thread-safe); the Audio stage now measures only game-thread
+reaping and should drop to near zero. Links SceKernelThreadMgr_stub.
+
+tests/vita_sdl_audio_test.cpp keeps all existing assertions on the fallback path
+and adds --threaded: a real audio thread mixes without UpdateSounds, voices are
+reaped on the game thread, 4000 iterations of concurrent start/3D/volume/stop/
+unload, and 200 stream deletions during slow callbacks. Clean under ASan/UBSan and
+ThreadSanitizer (a deliberately removed lock is reported). Hardware testing is
+required for audio continuity during loads, crackle and FPS impact.
+
+### v0.13.0 multicore pass02: queued drawing on worker cores
+
+During R_RenderActorView the column, span and wall drawers no longer write
+pixels on the game thread. 35 drawers in r_draw.cpp were converted by script:
+each body is unchanged except that dc_*/ds_*/vplce/bits globals are read from a
+captured argument block, and the public function now submits that block.
+src/r_draw_mt.cpp keeps an 8192-entry ring; two workers pinned to Vita user
+cores 1 and 2 execute every command but draw only the rows they own (row % 8
+slot ownership, fixed for the window), so each pixel has exactly one writer and
+keeps single-threaded ordering. Columns/walls are sliced by stepping dest,
+texture position and wall vplce by the owner's row stride; spans are per-row.
+Wall chaining is preserved: vline1 results and vplce advances are computed at
+submit time. Particles are queued as row-sliced rectangles.
+
+vita_drawthreads (default on) and vita_drawmainshare (0-4 eighths of rows drawn
+by the game thread, default 0) are in Vita Settings; both apply on the next
+frame. While queueing, R_SetPatchStyle uses one column at a time (the
+r_columnmethod 1 path writes the screen directly through a shared buffer).
+Fuzz, fog boundaries and voxels sync and draw inline; sloped and colored planes
+sync before writing directly; rt_draw4cols syncs as a safeguard. Double-sky
+composites come from a per-window arena instead of the 4-entry ring; an arena
+reset syncs first. The window closes (full sync) when the 3D view returns, so
+camera textures are complete before use and 2D/HUD drawing never overlaps.
+
+The Audio work trace line is replaced by Draw threads: game-thread wait,
+per-worker busy time, commands and syncs per frame (VPERF_DRAW_WAIT).
+
+tests/vita_draw_threads_test.py compiles the actual queue, kernels and stubs
+against the original drawers from git and requires byte-identical framebuffers
+and chained wall positions over random batches: all 35 drawers plus particles,
+shares 0-4, mid-window syncs, inline scopes, arena resets, threads off and ring
+wrap-around. Clean under ASan/UBSan and ThreadSanitizer; deliberate slicing,
+vplce, sync and arena-reset bugs are each detected. Hardware testing required
+for FPS, worker balance, slopes (frequent syncs) and visual correctness.
+
+### v0.13.0 multicore pass03: submit overhead and render-stage timers
+
+Hardware pass02 (NERVE MAP05, frozen view, 50 sprite passes): 46.1 -> 49.9 FPS
+with draw threads, but game-thread render time was unchanged (14.6 vs 14.8 ms).
+Workers were busy ~5.4 ms each and the game thread almost never waited, so the
+game thread's visibility work plus per-command submission is now the limit.
+
+Submission cost reduced: commands are published to the workers in batches of
+32 (one release store and wake check per batch, always published before any
+sync or ring wait); the free-space check uses a cached ring limit derived from
+monotonic read indices instead of reading every consumer per command; and the
+destination row is found with a cached reciprocal multiply because the Vita's
+Cortex-A9 has no integer divide instruction. Drawing results are unchanged.
+
+New Render stages trace line: game-thread time in BSP/walls, planes/skies and
+masked/sprites (nested in render; includes submission, not worker pixel work),
+plus the worst frame's draw wait. The differential test now also runs on a
+480x272 canvas and verifies the reciprocal row against division for every
+queued command (R_DRAW_MT_VERIFY). Hardware comparison required.
+
+### v0.13.0 multicore pass04: balanced bands and parallel frame conversion
+
+Hardware pass03 (NERVE MAP05 idclip view, 84 sprite passes, frozen): 42.3 ->
+47.5 FPS with draw threads; render 19.0 -> 16.1 ms (walls/BSP 11.0 -> 9.1,
+planes 2.1 -> 1.2, masked 5.6 -> 4.2). Worker 1 was busier (5.1 vs 3.8 ms)
+because the audio thread, now running FluidSynth, shares core 1; the game
+thread waited ~1 ms per frame for it. Palette conversion (~2.4 ms) still ran on
+the game thread alone.
+
+Row ownership is now contiguous bands instead of alternating rows: game thread
+share on top, then worker 1, then worker 2 to the canvas end. Commands are
+clipped to the band and drawn as one normal run. After every window the
+worker boundary moves halfway towards the split that would have equalised the
+two workers' measured busy time (bounded 3%..97%, starting at 45% for worker 1),
+which absorbs both audio load on core 1 and uneven scenes. Empty bands and
+zero-row clips draw nothing (drawer loops always draw at least one row).
+
+SDLFB::Update converts the 8-bit frame with R_DrawerParallelRows: the game
+thread converts the top third and the workers split the rest with the current
+balance. Unscaled conversion is independent per row. With draw threads off it
+runs inline as before. The Draw threads trace now shows worker-split; worker
+busy includes conversion jobs.
+
+The differential test adds forced extreme/random splits, views shorter than the
+canvas and parallel-row jobs (exact output, every row once, threads on/off);
+it found and now covers the empty-band case. Clean under ASan/UBSan and
+ThreadSanitizer. Hardware comparison required.
+
+### v0.13.0 multicore pass05: whole-sprite commands; conversion back on one thread
+
+Hardware pass04: band balancing works (worker-split settled at 44-48% for
+worker 1 in play, busy times within ~5%, end-of-frame wait 0.2-0.5 ms instead
+of ~1 ms). Parallel palette conversion was slower, not faster: convert rose
+from 2.38 ms (threads off) to 3.7-3.9 ms, and to ~4.5-5 ms on the title
+screen. The destination is the locked GPU texture, so the copy is memory-bound;
+three cores writing it contend. SDLFB::Update converts on the game thread
+again. R_DrawerParallelRows remains available (tested) but unused.
+
+R_DrawVisSprite now submits each sprite as one banded command while queueing
+(previously one command per post per column). The game thread stores each
+column's pixels, spans and clip limits in the frame arena; the workers run the
+R_DrawMaskedColumn post logic (ported statement for statement into
+K_DrawSpriteColumns in r_things.cpp) and draw only their band. Column drawers
+are mapped to kernels with R_GetColumnKernel; fuzz has no kernel and keeps the
+per-column path. New queue support: DK_BANDED commands with an inline argument
+block (up to 160 bytes) and R_DrawColumnClipped.
+
+Differential test: ~10,700 random whole sprites per run (all 16 column drawers,
+flipped/scaled sprites, gappy posts, crossed clips and clips within a few rows
+of the sprite edges) are pixel-identical to per-column R_DrawMaskedColumn with
+the original drawers, plus all earlier coverage. Clean under ASan/UBSan and
+ThreadSanitizer; a one-row change to the post-end adjustment is detected.
+Hardware comparison required.
+
+### v0.13.0 memory: extended budget, larger heap, resident effect preloads
+
+VitaSDK's newlib reserves a fixed 128 MiB malloc heap unless the program sets
+`_newlib_heap_size_user`. The VPK now requests the extended 365 MiB main-memory
+budget (`-d ATTRIBUTE2=12` via VITA_MKSFOEX_FLAGS) and the heap is 256 MiB
+(CMake `ZDOOM_VITA_HEAP_MB`). A `[Vita] Memory` trace line (boot and every 5 s)
+reports heap used/high-water and system free main/cdram/phycont memory. A
+hardware run with Boltgun + SCYTHE peaked at 89.8 MiB heap with 82 MiB main
+memory still free outside the heap; SDL takes all 112 MiB of CDRAM.
+
+That run also showed each map load spending ~7.4 s on PNG and ~3.4-3.9 s on
+sound decoding, repeated every map because the stock precache unloaded the
+previous map's effects first, with ~1950 sprites and ~380 sounds left out by
+the fixed 32/16 MiB budgets. Effect selection now happens before the stock
+unload pass, so chosen sprites/sounds stay resident between maps, and the
+budgets scale with the heap (3/8 and 3/16: 96/48 MiB at 256 MiB, never below
+32/16 MiB). Selection is deterministic per mod set, so retained memory stays
+within the budgets. Sound budgets use exact lengths for already-decoded sounds
+and the existing conservative estimate otherwise, with the post-decode recount
+kept. Joystick settings are now written into GameConfig before each periodic
+Vita config save (upstream only saved them from destructors at shutdown).

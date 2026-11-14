@@ -57,6 +57,7 @@
 #include <algorithm>
 #include <vector>
 EXTERN_CVAR(Bool, vita_precacheeffects)
+size_t I_VitaPrecacheBudget(bool pixels);
 #endif
 
 // MACROS ------------------------------------------------------------------
@@ -523,6 +524,51 @@ void S_PrecacheLevel ()
 			chan->SoundID.MarkUsed();
 		}
 
+#ifdef ZD_VITA
+		// Choose the extra effect sounds to keep before the unload pass below,
+		// so the ones kept from the previous map stay decoded instead of being
+		// freed and decoded again. The choice is the same every map for a given
+		// mod set, so the retained PCM never exceeds the budget.
+		std::vector<unsigned> vitaKeep;
+		size_t vitaBudget = 0;
+		unsigned vitaSkipped = 0, vitaRetained = 0;
+		if (vita_precacheeffects)
+		{
+			vitaBudget = I_VitaPrecacheBudget(false);
+			size_t bytes = 0;
+			std::vector<unsigned> candidates;
+			for (i = 1; i < S_sfx.Size(); ++i)
+			{
+				sfxinfo_t &sound = S_sfx[i];
+				if (!sound.bUsed && sound.link == sfxinfo_t::NO_LINK &&
+					!sound.bRandomHeader && !sound.bPlayerReserve && sound.lumpnum >= 0)
+					candidates.push_back(i);
+			}
+			// Later resource files are user mods/overrides. Prefer their short
+			// effects over unused base-game sounds and long ambient/dialogue clips.
+			std::stable_sort(candidates.begin(), candidates.end(), [](unsigned a, unsigned b)
+			{
+				int afile = Wads.GetLumpFile(S_sfx[a].lumpnum);
+				int bfile = Wads.GetLumpFile(S_sfx[b].lumpnum);
+				if (afile != bfile) return afile > bfile;
+				return Wads.LumpLength(S_sfx[a].lumpnum) < Wads.LumpLength(S_sfx[b].lumpnum);
+			});
+			for (unsigned n = 0; n < candidates.size(); ++n)
+			{
+				sfxinfo_t &sound = S_sfx[candidates[n]];
+				bool cached = sound.data.isValid();
+				// Exact size for sounds kept from the last map; a conservative
+				// estimate (no decoding) for the rest.
+				size_t size = cached ? size_t(GSnd->GetSampleLength(sound.data)) * 4u
+					: S_VitaPrecacheBytes(sound);
+				if (size > vitaBudget - bytes) { ++vitaSkipped; continue; }
+				bytes += size;
+				if (cached) ++vitaRetained;
+				sound.bUsed = true;
+				vitaKeep.push_back(candidates[n]);
+			}
+		}
+#endif
 		for (i = 1; i < S_sfx.Size(); ++i)
 		{
 			if (S_sfx[i].bUsed)
@@ -540,49 +586,28 @@ void S_PrecacheLevel ()
 #ifdef ZD_VITA
 		if (vita_precacheeffects)
 		{
-			// The stock precache only covers already-spawned actors' sounds.
-			// Decode additional concrete effects now, before gameplay.
-			const size_t limit = 16u * 1024u * 1024u;
+			// The pass above decoded the kept sounds. Recount with real lengths:
+			// estimates are conservative, but this also guards against
+			// malformed metadata.
 			size_t bytes = 0;
-			unsigned loaded = 0, skipped = 0;
-			std::vector<unsigned> candidates;
-			for (i = 1; i < S_sfx.Size(); ++i)
+			unsigned loaded = 0;
+			for (unsigned n = 0; n < vitaKeep.size(); ++n)
 			{
-				sfxinfo_t &sound = S_sfx[i];
-				if (!sound.data.isValid() && sound.link == sfxinfo_t::NO_LINK &&
-					!sound.bRandomHeader && !sound.bPlayerReserve && sound.lumpnum >= 0)
-					candidates.push_back(i);
-			}
-			// Later resource files are user mods/overrides. Prefer their short
-			// effects over unused base-game sounds and long ambient/dialogue clips.
-			std::stable_sort(candidates.begin(), candidates.end(), [](unsigned a, unsigned b)
-			{
-				int afile = Wads.GetLumpFile(S_sfx[a].lumpnum);
-				int bfile = Wads.GetLumpFile(S_sfx[b].lumpnum);
-				if (afile != bfile) return afile > bfile;
-				return Wads.LumpLength(S_sfx[a].lumpnum) < Wads.LumpLength(S_sfx[b].lumpnum);
-			});
-			for (unsigned n = 0; n < candidates.size(); ++n)
-			{
-				sfxinfo_t &sound = S_sfx[candidates[n]];
-				size_t estimate = S_VitaPrecacheBytes(sound);
-				if (estimate > limit - bytes) { ++skipped; continue; }
-				sfxinfo_t *actual = S_LoadSound(&sound);
-				if (actual != &sound || !sound.data.isValid()) continue;
-				// Final conservative check also protects against malformed metadata.
+				sfxinfo_t &sound = S_sfx[vitaKeep[n]];
+				if (!sound.data.isValid()) { sound.bUsed = false; continue; }
 				size_t size = size_t(GSnd->GetSampleLength(sound.data)) * 4u;
-				if (size > limit - bytes)
+				if (size > vitaBudget - bytes)
 				{
 					S_UnloadSound(&sound);
-					++skipped;
+					sound.bUsed = false;
+					++vitaSkipped;
 					continue;
 				}
 				bytes += size;
-				sound.bUsed = true;
 				++loaded;
 			}
-			I_VitaTrace("[Vita] Preload: sounds=%u PCM-budget=%u KiB budget-skipped=%u\n",
-				loaded, unsigned(bytes/1024), skipped);
+			I_VitaTrace("[Vita] Preload: sounds=%u (kept from last map %u) PCM=%u KiB of %u KiB budget-skipped=%u\n",
+				loaded, vitaRetained, unsigned(bytes/1024), unsigned(vitaBudget/1024), vitaSkipped);
 		}
 #endif
 

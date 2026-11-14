@@ -58,6 +58,7 @@
 #include "info.h"
 #include "r_state.h"
 #include "posix/vita_debug.h"
+size_t I_VitaPrecacheBudget(bool pixels);
 #endif
 
 
@@ -1260,18 +1261,20 @@ void FTextureManager::PrecacheLevel (void)
 		if (tex.Exists()) hitlist[tex.GetIndex()] |= FTextureManager::HIT_Wall;
 	}
 
-	for (int i = cnt - 1; i >= 0; i--)
-	{
-		Renderer->PrecacheTexture(ByIndex(i), hitlist[i]);
-	}
-
 #ifdef ZD_VITA
+	// Pick the extra effect sprites before the stock pass below, so the ones
+	// kept from the previous map are not unloaded and decoded all over again.
+	// The pick is the same every map for a given mod set, so the retained
+	// pixels never exceed the budget.
+	BYTE *effects = NULL;
+	size_t effectBytes = 0, effectBudget = 0;
+	unsigned effectKept = 0, effectSkipped = 0;
 	if (vita_precacheeffects)
 	{
 		// Prefetch sprites for non-normal styles, projectiles and noninteractive effects.
 		// Include inherited states: these classes may not yet exist on the map.
 		// Keep spans lazy so the extra pixel cache has a predictable limit.
-		BYTE *effects = new BYTE[cnt]();
+		effects = new BYTE[cnt]();
 		for (unsigned n = 0; n < PClass::m_Types.Size(); ++n)
 		{
 			PClass *type = PClass::m_Types[n];
@@ -1296,22 +1299,41 @@ void FTextureManager::PrecacheLevel (void)
 				}
 			}
 		}
-		size_t bytes = 0;
-		unsigned loaded = 0, skipped = 0;
-		const size_t limit = 32u * 1024u * 1024u;
+		effectBudget = I_VitaPrecacheBudget(true);
 		for (int i = 0; i < cnt; ++i)
 		{
 			FTexture *tex = ByIndex(i);
-			if (!effects[i] || hitlist[i] || !tex) continue;
+			if (!effects[i]) continue;
+			if (hitlist[i] || !tex) { effects[i] = 0; continue; }
 			size_t size = size_t(tex->GetWidth()) * tex->GetHeight();
-			if (!size || size > limit - bytes) { ++skipped; continue; }
-			tex->GetPixels();
-			bytes += size;
-			++loaded;
+			if (!size || size > effectBudget - effectBytes) { effects[i] = 0; ++effectSkipped; continue; }
+			effectBytes += size;
+		}
+	}
+#endif
+
+	for (int i = cnt - 1; i >= 0; i--)
+	{
+#ifdef ZD_VITA
+		// Kept effects are loaded below; don't unload them here.
+		if (effects != NULL && effects[i]) continue;
+#endif
+		Renderer->PrecacheTexture(ByIndex(i), hitlist[i]);
+	}
+
+#ifdef ZD_VITA
+	if (effects != NULL)
+	{
+		// Already-cached pixels from the previous map make this a no-op.
+		for (int i = 0; i < cnt; ++i)
+		{
+			if (!effects[i]) continue;
+			ByIndex(i)->GetPixels();
+			++effectKept;
 		}
 		delete[] effects;
-		I_VitaTrace("[Vita] Preload: effect sprites=%u pixels=%u KiB budget-skipped=%u\n",
-			loaded, unsigned(bytes/1024), skipped);
+		I_VitaTrace("[Vita] Preload: effect sprites=%u pixels=%u KiB of %u KiB budget-skipped=%u\n",
+			effectKept, unsigned(effectBytes/1024), unsigned(effectBudget/1024), effectSkipped);
 	}
 #endif
 

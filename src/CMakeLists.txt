@@ -635,6 +635,12 @@ set( PLAT_SDL_SOURCES
 if( VITA )
 	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES} posix/vita_launcher.cpp )
 	add_definitions( -DNO_CRASHCATCHER -DZD_VITA=1 )
+	# newlib's malloc heap is one fixed memory block reserved at boot; VitaSDK's
+	# default is only 128 MiB. The VPK requests the extended 365 MiB main-memory
+	# budget (ATTRIBUTE2=12, see the top-level CMakeLists), so a larger heap fits
+	# with room left for code, thread stacks, SDL and system modules.
+	set( ZDOOM_VITA_HEAP_MB 256 CACHE STRING "newlib heap size in MiB (VitaSDK default is 128)" )
+	add_definitions( -DZD_VITA_HEAP_MB=${ZDOOM_VITA_HEAP_MB} )
 else( VITA )
 	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES} posix/sdl/crashcatcher.c )
 endif( VITA )
@@ -1361,6 +1367,8 @@ if( VITA )
 	target_link_libraries(zdoom SceIme_stub)
 	# Audio thread core affinity (sceKernelChangeThreadCpuAffinityMask).
 	target_link_libraries(zdoom SceKernelThreadMgr_stub)
+	# Memory report (sceKernelGetFreeMemorySize).
+	target_link_libraries(zdoom SceSysmem_stub)
 	if( FLUIDSYNTH_FOUND )
 		target_link_libraries(zdoom pthread)
 	endif()

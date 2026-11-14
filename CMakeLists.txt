@@ -299,6 +299,11 @@ if( VITA )
 			FILE "${CMAKE_BINARY_DIR}/vita-timidity.cfg" vita-timidity.cfg )
 	endif()
 	vita_create_self( zdoom.self zdoom )
+	# Extended memory mode: raises the main-memory budget from 256 to 365 MiB
+	# (+109 MiB). Needed for the larger newlib heap set in src/CMakeLists.txt.
+	if( NOT VITA_MKSFOEX_FLAGS MATCHES "ATTRIBUTE2" )
+		set( VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d ATTRIBUTE2=12" )
+	endif()
 	vita_create_vpk( zdoom.vpk "${ZDOOM_VITA_TITLE_ID}" zdoom.self
 		VERSION "${ZDOOM_VITA_VERSION}"
 		NAME "ZDoom Vita"

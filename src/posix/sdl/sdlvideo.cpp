@@ -95,6 +95,7 @@ struct MiniModeInfo
 
 #ifdef ZD_VITA
 #include "r_draw_mt.h"
+void I_VitaTraceMemory(const char *when);
 #endif
 
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
@@ -980,6 +981,7 @@ void I_VitaPerfFrame(Uint64 start)
 	}
 	// Game-thread time inside the 3D view (nested in render). With draw threads
 	// on, these include submitting commands but not the workers' pixel work.
+	I_VitaTraceMemory(NULL);
 	I_VitaTrace("[Vita] Render stages: walls/BSP=%.2f planes=%.2f masked=%.2f ms/frame; worst-frame walls/BSP=%.2f planes=%.2f masked=%.2f draw-wait=%.2f ms\n",
 		VitaPerfTotals[VPERF_R_WALLS]*ms, VitaPerfTotals[VPERF_R_PLANES]*ms, VitaPerfTotals[VPERF_R_MASKED]*ms,
 		VitaPerfWorst[VPERF_R_WALLS]*tickms, VitaPerfWorst[VPERF_R_PLANES]*tickms, VitaPerfWorst[VPERF_R_MASKED]*tickms,
