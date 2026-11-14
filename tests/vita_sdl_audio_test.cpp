@@ -5,15 +5,20 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <mutex>
+#include <thread>
+#include <chrono>
+#include <atomic>
 #define I_VitaTrace(...) ((void)0)
 #include "../src/c_cvars.h"
 #undef EXTERN_CVAR
 #define EXTERN_CVAR(type,name) extern bool name;
 bool snd_pitched=false;
 #include "../src/sound/sdl_sound.cpp"
+static std::recursive_mutex queueLock; // fake device; the audio thread queues concurrently
 static std::vector<short> queued;
 static unsigned queuedBytes;
-static int ended;
+static std::atomic<int> ended;
 static std::vector<FISoundChannel*> channels;
 extern "C" {
 int SDL_InitSubSystem(Uint32){return 0;}
@@ -23,9 +28,9 @@ const char *SDL_GetCurrentAudioDriver(){return "test";}
 SDL_AudioDeviceID SDL_OpenAudioDevice(const char*,int,const SDL_AudioSpec*w,SDL_AudioSpec*h,int){*h=*w;return 1;}
 void SDL_CloseAudioDevice(SDL_AudioDeviceID){}
 void SDL_PauseAudioDevice(SDL_AudioDeviceID,int){}
-void SDL_ClearQueuedAudio(SDL_AudioDeviceID){queuedBytes=0;queued.clear();}
-Uint32 SDL_GetQueuedAudioSize(SDL_AudioDeviceID){return queuedBytes;}
-int SDL_QueueAudio(SDL_AudioDeviceID,const void*d,Uint32 n){const short*p=(const short*)d;queued.insert(queued.end(),p,p+n/2);queuedBytes+=n;return 0;}
+void SDL_ClearQueuedAudio(SDL_AudioDeviceID){std::lock_guard<std::recursive_mutex> g(queueLock);queuedBytes=0;queued.clear();}
+Uint32 SDL_GetQueuedAudioSize(SDL_AudioDeviceID){std::lock_guard<std::recursive_mutex> g(queueLock);return queuedBytes;}
+int SDL_QueueAudio(SDL_AudioDeviceID,const void*d,Uint32 n){std::lock_guard<std::recursive_mutex> g(queueLock);const short*p=(const short*)d;queued.insert(queued.end(),p,p+n/2);queuedBytes+=n;return 0;}
 Uint32 SDL_GetTicks(){return 100;}
 SDL_RWops *SDL_RWFromConstMem(const void*,int){return NULL;}
 SDL_AudioSpec *SDL_LoadWAV_RW(SDL_RWops*,int,SDL_AudioSpec*,Uint8**,Uint32*){return NULL;}
@@ -35,6 +40,25 @@ int SDL_ConvertAudio(SDL_AudioCVT*){return -1;}
 void *SDL_malloc(size_t n){return malloc(n);}
 void SDL_free(void*p){free(p);}
 void *SDL_memset(void*p,int c,size_t n){return memset(p,c,n);}
+// Threading stubs. By default thread creation "fails", which exercises the
+// game-thread fallback deterministically; CheckAudioThread() enables a real
+// std::thread to exercise the audio-thread path (run under -fsanitize=thread).
+static bool useRealThread=false;
+struct SDL_mutex { std::mutex m; };
+struct SDL_Thread { std::thread t; };
+SDL_mutex *SDL_CreateMutex(){return new SDL_mutex;}
+void SDL_DestroyMutex(SDL_mutex*m){delete m;}
+int SDL_LockMutex(SDL_mutex*m){m->m.lock();return 0;}
+int SDL_UnlockMutex(SDL_mutex*m){m->m.unlock();return 0;}
+int SDL_AtomicSet(SDL_atomic_t*a,int v){return __atomic_exchange_n(&a->value,v,__ATOMIC_SEQ_CST);}
+int SDL_AtomicGet(SDL_atomic_t*a){return __atomic_load_n(&a->value,__ATOMIC_SEQ_CST);}
+SDL_Thread *SDL_CreateThreadWithStackSize(SDL_ThreadFunction fn,const char*,const size_t,void*data){
+ if(!useRealThread)return NULL;
+ auto*t=new SDL_Thread;t->t=std::thread([fn,data]{fn(data);});return t;
+}
+void SDL_WaitThread(SDL_Thread*t,int*){t->t.join();delete t;}
+int SDL_SetThreadPriority(SDL_ThreadPriority){return 0;}
+void SDL_Delay(Uint32 ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));}
 }
 FNullStringData FString::NullString={0,0,0,{0,0}};
 FString::~FString(){--NullString.RefCount;}
@@ -75,7 +99,7 @@ struct MusicReader : FileReader {
   n=std::min(n,Length-FilePos);memcpy(out,bytes.data()+FilePos,n);FilePos+=n;return n;
  }
 };
-static void Drain(){queuedBytes=0;queued.clear();}
+static void Drain(){std::lock_guard<std::recursive_mutex> g(queueLock);queuedBytes=0;queued.clear();}
 static bool Synth(SoundStream*,void*b,int n,void*u){++*(int*)u;float*p=(float*)b;for(int i=0;i<n/4;++i)p[i]=.25f;return true;}
 struct TinyMusic : VitaMusicDecoder {
  int position=0,total;
@@ -89,7 +113,7 @@ struct TinyMusic : VitaMusicDecoder {
 };
 static void CheckDigitalLifecycle() {
  for(int rate:{22050,44100,48000,96000})for(int ch:{1,2}) {
-  DigitalStream music(NULL,new TinyMusic(rate,ch,17003));
+  DigitalStream music(NULL,NULL,new TinyMusic(rate,ch,17003));
   assert(music.Play(false,.5f));float l=0,r=0;int frames=0;
   while(music.ReadFrame(l,r)){assert(l>0 && l==r);++frames;}
   assert(std::abs(frames-int(std::ceil(17003.0*OutputRate/rate)))<=1);
@@ -99,15 +123,77 @@ static void CheckDigitalLifecycle() {
   assert(music.SetPosition(100));assert(music.ReadFrame(l,r));
   music.Stop();assert(music.IsEnded()&&!music.ReadFrame(l,r));
  }
- DigitalStream tiny(NULL,new TinyMusic(44100,1,3));
+ DigitalStream tiny(NULL,NULL,new TinyMusic(44100,1,3));
  assert(tiny.Play(true,1));float l,r;
  for(int i=0;i<10000;++i)assert(tiny.ReadFrame(l,r)&&l>0&&l==r);
- DigitalStream empty(NULL,new TinyMusic(44100,1,0));
+ DigitalStream empty(NULL,NULL,new TinyMusic(44100,1,0));
  assert(empty.Play(true,1));assert(!empty.ReadFrame(l,r)&&empty.IsEnded());
  puts("PASS: digital EOF, restart, mono/stereo rate conversion, seek, tiny loops and empty-loop guard");
 }
+
+static bool QueuedAudible(){std::lock_guard<std::recursive_mutex> g(queueLock);for(short v:queued)if(v)return true;return false;}
+static bool Slow(SoundStream*,void*b,int n,void*u){
+ ++*(std::atomic<int>*)u;std::this_thread::sleep_for(std::chrono::microseconds(200));
+ float*p=(float*)b;for(int i=0;i<n/4;++i)p[i]=.25f;return true;
+}
+// Real audio thread: mixing happens without UpdateSounds(), finished voices are
+// reaped on the game thread, and concurrent start/stop/unload/stream teardown
+// is race-free (verified by ThreadSanitizer in the threaded build).
+static void CheckAudioThread(){
+ useRealThread=true;ended=0;Drain();
+ auto*r=CreateSDLSoundRenderer();assert(r->IsValid());
+ BYTE raw[]={128,255,0,128};
+ auto s=r->LoadSoundRaw(raw,4,44100,1,8,-1);
+ auto*loop=r->StartSound(s,1,128,SNDF_LOOP,NULL);assert(loop);
+ bool audible=false;
+ for(int i=0;i<200 && !audible;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));audible=QueuedAudible();}
+ assert(audible); // mixed by the audio thread, no UpdateSounds() call
+ r->StopChannel(loop);assert(!loop->SysChannel);
+ auto*once=r->StartSound(s,1,128,0,NULL);assert(once);
+ for(int i=0;i<500 && ended==1;++i){Drain();std::this_thread::sleep_for(std::chrono::milliseconds(1));r->UpdateSounds();}
+ assert(ended>=2); // StopChannel + natural completion reaped on this thread
+ SoundListener listener;listener.valid=true;listener.angle=0;listener.position=FVector3(0,0,0);
+ FRolloffInfo rolloff={};
+ std::vector<FISoundChannel*> live;
+ auto stopOldest=[&]{r->StopChannel(live.front());live.erase(live.begin());};
+ for(int i=0;i<4000;++i){
+  auto*c=(i&1)?r->StartSound3D(s,&listener,1,&rolloff,1,128,0,FVector3(float(i%7),1,0),FVector3(0,0,0),0,SNDF_LOOP,NULL)
+              :r->StartSound(s,.5f,128,SNDF_LOOP,NULL);
+  if(c)live.push_back(c);
+  // Touch every live voice while the audio thread is mixing them.
+  for(auto*v:live){r->ChannelVolume(v,.25f+(i%4)*.1f);r->UpdateSoundParams3D(&listener,v,false,FVector3(1,float(i%5),0),FVector3(0,0,0));
+   (void)r->GetPosition(v);(void)r->GetAudibility(v);}
+  while(live.size()>12)stopOldest();
+  if(i%16==0)std::this_thread::sleep_for(std::chrono::microseconds(500));
+  if(i%64==0){r->SetSfxPaused(i%128==0,0);r->SetSfxVolume(.8f);r->SetMusicVolume(.7f);r->UpdateSounds();Drain();}
+  if(i%500==0){while(!live.empty())stopOldest();r->UnloadSound(s);s=r->LoadSoundRaw(raw,4,44100,1,8,-1);}
+ }
+ while(!live.empty())stopOldest();
+ r->SetSfxPaused(false,0);
+ auto once2=r->StartSound(s,1,128,0,NULL);assert(once2);
+ for(int i=0;i<200;++i){Drain();std::this_thread::sleep_for(std::chrono::milliseconds(1));r->UpdateSounds();if(!once2->SysChannel)break;}
+ assert(!once2->SysChannel); // natural completion reaped while other work happened
+ r->SetSfxPaused(false,0);
+ std::atomic<int> calls(0);
+ for(int i=0;i<200;++i){
+  auto*stream=r->CreateStream(Slow,256,SoundStream::Float|SoundStream::Mono,22050,&calls);
+  assert(stream && stream->Play(true,.5f));
+  std::this_thread::sleep_for(std::chrono::microseconds(300));
+  stream->SetVolume(.3f);(void)stream->GetPosition();(void)stream->IsEnded();
+  if(i%3==0){Drain();}
+  delete stream; // must not race with the audio thread inside Slow()
+ }
+ assert(calls>0);
+ r->Sync(true);r->Sync(false);r->SetInactive(SoundRenderer::INACTIVE_Mute);r->SetInactive(SoundRenderer::INACTIVE_Active);
+ r->UnloadSound(s);
+ delete r; // joins the audio thread
+ useRealThread=false;Drain();
+ for(auto*c:channels)delete c;channels.clear();
+ puts("PASS: audio thread mixes independently; game-thread reaping; concurrent start/stop/3D/unload; stream teardown during callbacks");fflush(stdout);
+}
 int main(int argc,char **argv){
  CheckDigitalLifecycle();
+ if(argc==2 && std::string(argv[1])=="--threaded"){CheckAudioThread();return 0;}
  auto*r=CreateSDLSoundRenderer();assert(r->IsValid());
  if(argc==3 && std::string(argv[1])=="--music") {
   std::ifstream list(argv[2]);std::string path;unsigned tracks=0;

@@ -1358,6 +1358,8 @@ source_group("Source Files" FILES ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h s
 
 if( VITA )
 	target_link_libraries(zdoom SceIme_stub)
+	# Audio thread core affinity (sceKernelChangeThreadCpuAffinityMask).
+	target_link_libraries(zdoom SceKernelThreadMgr_stub)
 	if( FLUIDSYNTH_FOUND )
 		target_link_libraries(zdoom pthread)
 	endif()
