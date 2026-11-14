@@ -61,6 +61,7 @@
 #include "v_font.h"
 #include "r_data/colormaps.h"
 #include "farchive.h"
+#include "r_cornershade.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -757,6 +758,7 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 	// Queue drawing to the worker cores for the rest of this view; the window
 	// is flushed when this function returns (including by exception).
 	FDrawerQueueWindow drawerWindow;
+	R_CornerShadeBeginView ();
 
 	// Clear buffers.
 	R_ClearClipSegs (0, viewwidth);
@@ -838,6 +840,10 @@ void R_RenderActorView (AActor *actor, bool dontmaplines)
 		}
 
 		NetUpdate ();
+
+		// Darken wall/floor/ceiling seams now that every wall and plane is
+		// drawn, but before sprites and masked mid-textures.
+		R_CornerShadeApply ();
 		
 		MaskedCycles.Clock();
 		{

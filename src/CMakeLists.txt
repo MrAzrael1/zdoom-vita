@@ -1015,6 +1015,7 @@ add_executable( zdoom WIN32 MACOSX_BUNDLE
 	r_bsp.cpp
 	r_draw.cpp
 	r_draw_mt.cpp
+	r_cornershade.cpp
 	r_drawt.cpp
 	r_main.cpp
 	r_plane.cpp

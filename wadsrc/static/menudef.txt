@@ -1790,4 +1790,11 @@ OptionMenu "VitaSettings"
 	Slider "Game thread draw share (/8)", "vita_drawmainshare", 0, 4, 1, 0
 	StaticText "(EXPERIMENTAL) DRAWS THE 3D VIEW ON CORES 1-2."
 	StaticText "SHARE 0 = WORKER CORES ONLY."
+	StaticText " "
+	Option "Corner shading", "vita_cornershade", "OnOff"
+	Slider "Corner shading strength", "vita_cornershade_strength", 1, 10, 1, 0
+	Slider "Corner shading size", "vita_cornershade_size", 4, 32, 4, 0
+	Slider "Skip pixels brighter than (%)", "vita_cornershade_highlight", 50, 100, 5, 0
+	StaticText "DARKENS WHERE WALLS MEET FLOORS"
+	StaticText "AND CEILINGS (FAKE AMBIENT OCCLUSION)."
 }
