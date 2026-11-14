@@ -389,6 +389,8 @@ bool M_SaveDefaults (const char *filename)
 
 
 #ifdef ZD_VITA
+void I_SaveJoystickConfigs();
+
 void M_VitaSaveConfig(bool force)
 {
 	static unsigned int lastSave;
@@ -396,6 +398,7 @@ void M_VitaSaveConfig(bool force)
 	unsigned int now=I_MSTime();
 	if (!force && lastSave && now-lastSave < 10000) return;
 	lastSave=now;
+	I_SaveJoystickConfigs();
 	if (!M_SaveDefaults(NULL))
 		Printf("Could not save Vita configuration: %s\n", strerror(errno));
 }

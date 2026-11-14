@@ -285,6 +285,11 @@ public:
 		for(unsigned int i = 0;i < Joysticks.Size();++i)
 			Joysticks[i]->ProcessInput();
 	}
+	void SaveConfigs() const
+	{
+		for(unsigned int i = 0;i < Joysticks.Size();++i)
+			M_SaveJoystickConfig(Joysticks[i]);
+	}
 protected:
 	TArray<SDLInputJoystick *> Joysticks;
 };
@@ -303,6 +308,17 @@ void I_ShutdownJoysticks()
 		JoystickManager = NULL;
 		SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
 	}
+}
+
+// Copies every controller's in-memory settings (sensitivity, axis scale,
+// dead zone, mapping) into the [Joy:...] sections of GameConfig. Upstream
+// only does this from the joystick destructors at shutdown, which never run
+// when the Vita app is closed from the LiveArea, so the Vita's periodic
+// config save calls this first.
+void I_SaveJoystickConfigs()
+{
+	if (JoystickManager != NULL && GameConfig != NULL)
+		JoystickManager->SaveConfigs();
 }
 
 void I_GetJoysticks(TArray<IJoystickConfig *> &sticks)
