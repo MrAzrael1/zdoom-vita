@@ -499,14 +499,15 @@ void SDLFB::Update ()
 
 	DrawRateStuff ();
 
-#ifndef __APPLE__
+#ifdef ZD_VITA
+	if (!cl_capfps)
+	{
+		I_WaitForFPSLimit();	// vita_framecap; does nothing when unlimited
+	}
+#elif !defined(__APPLE__)
 	if(vid_maxfps && !cl_capfps)
 	{
-#ifdef ZD_VITA
-		I_WaitForFPSLimit();
-#else
 		SEMAPHORE_WAIT(FPSLimitSemaphore)
-#endif
 	}
 #endif
 
@@ -846,6 +847,15 @@ void SDLFB::SetVSync (bool vsync)
 
 		const GLint value = vsync ? 1 : 0;
 		CGLSetParameter(context, kCGLCPSwapInterval, &value);
+	}
+#elif defined(ZD_VITA)
+	// The Vita GXM renderer switches vsync in place (its display queue waits
+	// for the vertical refresh after each flip); recreating the renderer would
+	// reallocate all of its video memory.
+	if (Renderer != NULL)
+	{
+		const int result = SDL_RenderSetVSync (Renderer, vsync ? 1 : 0);
+		I_VitaTrace ("[Vita] Display: vsync %s (result %d)\n", vsync ? "on" : "off", result);
 	}
 #else
 	ResetSDLRenderer ();

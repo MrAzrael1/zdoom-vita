@@ -904,3 +904,99 @@ index that is neither hit nor kept, so it was unloaded there and decoded
 again. The stock pass now never unloads a texture object that is in the kept
 set, and the effect preload line reports decoded=N (with the first few names
 and use types) and shared-skips=N to confirm.
+
+Third load profile: map01 26.9 s, MAP02 2.9 s, MAP03 3.2 s. The diagnostic
+showed the same 912 sprites (HBLF*, HBLP*) decoded on every map with no shared
+indices: TEXTURES definitions with one same-sized patch redirect GetPixels to
+the patch texture, which has its own index that is neither hit nor kept, so the
+stock pass unloaded it each map. The kept set now holds the redirect targets of
+every hit or kept texture and the stock pass leaves them loaded (also fixing
+the map's own redirected sprites being freed straight after precaching when
+the patch index came later in the loop). The trace reports patches-kept=N.
+
+Corner shading now skips the floor/ceiling seams of sectors with an active
+mover (floordata/ceilingdata), since door undersides, door tracks and lift
+shafts slide with the moving surface and showed as dark bands.
+
+Corner shading occlusion fix (from a debug-colour screenshot): floor-seam
+shading of the room behind a partly open door was drawn over the door face.
+The seam lay above the door's bottom edge, i.e. covered from above by
+ceilingclip, but floor seams were only tested and clipped against floorclip
+(ceiling seams likewise only against ceilingclip). R_CornerShadeAdd now gets
+both clips, skips seams hidden on either side (unless by the view edge) and
+clips both shading ranges to the rows still uncovered in that column.
+
+Load profile with the patch fix: MAP02 460 ms (decoded=0, patches-kept=935),
+map01 27.0 s (first decode of everything).
+
+### v0.13.0 parallel decoding on map load
+
+posix/vita_loadpool.cpp runs FVitaLoadJob lists: the game thread calls Read()
+for each job in order (lump reads and pk3 unpacking stay single-threaded;
+FileReader is not thread-safe) and publishes it, two persistent loader threads
+pinned to cores 1 and 2 (512 KiB stacks for stb_vorbis temporaries) claim and
+Decode() published jobs, the game thread joins in once everything is read,
+and Finish() runs in order on the game thread. Input read but not decoded is
+capped at 24 MiB (the game thread decodes instead of reading while over it).
+A Busy count makes sure no loader still references a finished run. newlib's
+malloc is locked on Vita (mlock.c), so decoders may allocate.
+tests/vita_loadpool_test.cpp stress-tests ordering, exactly-once decoding and
+the memory cap; it passes under ASan/UBSan and TSan on a PC with stub
+psp2/kernel/threadmgr.h and vita_debug.h headers.
+
+Textures: FTexture gained VitaPendingDecodeLump/VitaDecodeFromMemory, which
+FPNGTexture implements by running its PNG decode (split out as
+MakeTextureFrom) over a MemoryReader. PrecacheLevel queues the redirect
+targets of every hit or kept texture that still needs pixels, decodes them in
+parallel, and the stock and effect passes then find them cached.
+
+Sounds: effect candidates that are not yet measured are decoded in parallel
+batches of 64 (format dispatch identical to S_LoadSound; the renderer's
+LoadSound* only build a new sample). Sounds sharing a lump with another sound
+still go through S_LoadSound so they are linked; failed decodes are recorded
+as "cannot preload". Selection order and budget accounting are unchanged.
+VPERF_PNG_LOAD/VPERF_SOUND_LOAD from loader threads are ignored so the
+game-thread profiling counters stay single-writer; the pool traces its own
+"Parallel PNG decode" and "Parallel sound decode" lines.
+
+Parallel decode results (Boltgun + NERVE): map01 27.0 s -> 20.1 s, later maps
+0.5-0.8 s. PNG decoding itself was only 3.2 s across the cores; the rest was
+lump reading on the game thread (~2.3 ms per lump, ~9,400 latency-bound reads
+plus a separate zip local-header read per entry).
+
+### v0.13.0 bulk lump reads
+
+posix/vita_bulkread.cpp: FResourceLump::VitaGetRawInfo (WAD lumps and stored
+or deflated zip entries that are not cached or in memory) gives each lump's
+container and position. Decode runs now sort their lumps by position, group
+neighbours (gap <= 64 KiB) into spans of up to 2 MiB, read each span with one
+read, skip zip local headers inside the span (with slack for their variable
+part; anything unusual falls back to a normal read), and hand jobs the still-
+compressed bytes; I_VitaUnpackLump inflates (raw deflate, size checked) on
+the loader threads. Corrupt data leaves the asset to load normally later.
+Sound batches grew from 64 to 256 so more lumps share spans.
+tests/vita_bulkread_test.cpp with vita_bulkread_make_zip.py checks
+byte-identical output against Python's zipfile for stored/deflated entries,
+large extra fields and >2 MiB lumps in sorted and shuffled orders (400 lumps
+in ~20 reads when sorted), plus rejection of corrupt deflate data.
+
+### v0.13.0 frame-rate cap
+
+vita_framecap (Vita Settings "Frame rate cap": 30 fps / 60 fps / Unlimited,
+default 60; console accepts 20-240, 0 = unlimited) replaces vid_maxfps on
+Vita. I_WaitForFPSLimit schedules frames against fixed performance-counter
+deadlines (sleep with sceKernelDelayThread, spin the last ~0.4 ms), resyncs
+instead of bursting when more than a frame late, and is skipped with
+cl_capfps. The previous whole-millisecond SDL_Delay limiter ran "60" at 62.5
+fps and drifted.
+
+### v0.13.0 vertical sync
+
+vid_vsync (also in Vita Settings, default off) now switches in place on Vita
+with SDL_RenderSetVSync: SDL's GXM renderer then waits for the vertical
+refresh in its display-queue callback after each flip. The generic SDL path
+recreated the renderer, which would reallocate its video memory. With vsync
+on, a 60 fps or unlimited cap is paced by the renderer itself; lower caps hold
+each frame for a whole number of refreshes counted with sceDisplayGetVcount /
+sceDisplayWaitVblankStart (30 fps = every second refresh), so the cadence
+cannot drift against a timer. SceDisplay_stub is linked explicitly.

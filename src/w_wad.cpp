@@ -1721,3 +1721,10 @@ CCMD(lumpnumfull)
 	}
 }
 #endif
+
+#ifdef ZD_VITA
+FResourceLump *FWadCollection::VitaGetLump(int lump) const
+{
+	return (unsigned)lump < LumpInfo.Size() ? LumpInfo[lump].lump : NULL;
+}
+#endif

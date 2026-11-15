@@ -55,6 +55,7 @@
 #include "posix/vita_debug.h"
 #include "posix/vita_perf.h"
 #include "posix/vita_loadpool.h"
+#include "posix/vita_bulkread.h"
 #include "sound/vita_vorbis.h"
 #include <algorithm>
 #include <vector>
@@ -481,40 +482,42 @@ void S_Start ()
 // the sound backend could not decode).
 static std::vector<size_t> VitaEffectSoundBytes;
 
-// Reads a sound lump on the game thread; decodes it on any core. Decode
-// mirrors the format dispatch of S_LoadSound, and the sound renderer's
-// LoadSound* calls only build a new sample.
+// Fetches a sound lump (still compressed) on the game thread through the bulk
+// reader; inflates and decodes it on any core. Decode mirrors the format
+// dispatch of S_LoadSound, and the sound renderer's LoadSound* calls only
+// build a new sample.
 class FVitaSoundDecodeJob : public FVitaLoadJob
 {
 public:
 	unsigned Id;
 	SoundHandle Result;
 private:
-	int Lump, Length, RawRate, LoopStart;
+	int RawRate, LoopStart;
 	bool Raw;
-	BYTE *Data;
+	FVitaBulkReader *Bulk;
+	unsigned Index;
+	FVitaRawLump Input;
 public:
-	FVitaSoundDecodeJob(unsigned id) : Id(id), Data(NULL)
+	FVitaSoundDecodeJob(unsigned id, FVitaBulkReader *bulk, unsigned index) : Id(id), Bulk(bulk), Index(index)
 	{
 		sfxinfo_t &sfx = S_sfx[id];
 		Result.data = NULL;
-		Lump = sfx.lumpnum;
-		Length = 0;
 		Raw = sfx.bLoadRAW;
 		RawRate = sfx.RawRate;
 		LoopStart = sfx.LoopStart;
+		Input.data = NULL;
 	}
-	~FVitaSoundDecodeJob() { delete[] Data; }
+	~FVitaSoundDecodeJob() { delete[] Input.data; }
 	size_t Read()
 	{
-		Length = Wads.LumpLength(Lump);
-		if (Length <= 0) return 0;
-		Data = new BYTE[Length];
-		Wads.ReadLump(Lump, Data);
-		return size_t(Length);
+		Bulk->Fetch(Index, Input);
+		return size_t(Input.size);
 	}
 	void Decode()
 	{
+		long length;
+		BYTE *Data = I_VitaUnpackLump(Input, length);
+		const int Length = int(length);
 		if (Data != NULL && Length >= 8)
 		{
 			SDWORD dmxlen = LittleLong(((SDWORD *)Data)[1]);
@@ -545,7 +548,7 @@ public:
 static void S_VitaDecodeSoundBatch(const std::vector<unsigned> &candidates, unsigned from,
 	std::vector<char> &tried, std::vector<char> &fresh, FVitaLoadPoolStats &total)
 {
-	enum { BATCH = 64 };
+	enum { BATCH = 256 };
 	std::vector<unsigned> ids;
 	std::vector<int> lumps;
 	for (unsigned k = from; k < candidates.size() && ids.size() < BATCH; ++k)
@@ -568,9 +571,20 @@ static void S_VitaDecodeSoundBatch(const std::vector<unsigned> &candidates, unsi
 	}
 	if (ids.empty()) return;
 
+	// Fetch in file order so neighbouring lumps share one large read.
+	std::vector<std::pair<std::pair<const void *, long>, unsigned> > order(ids.size());
+	for (unsigned n = 0; n < ids.size(); ++n)
+	{
+		I_VitaLumpPosition(S_sfx[ids[n]].lumpnum, order[n].first.first, order[n].first.second);
+		order[n].second = ids[n];
+	}
+	std::stable_sort(order.begin(), order.end());
+	std::vector<int> bulkLumps(ids.size());
+	for (unsigned n = 0; n < order.size(); ++n) bulkLumps[n] = S_sfx[order[n].second].lumpnum;
+	FVitaBulkReader bulk(bulkLumps);
 	std::vector<FVitaSoundDecodeJob> work;	// never reallocated once filled
 	work.reserve(ids.size());
-	for (unsigned n = 0; n < ids.size(); ++n) work.push_back(FVitaSoundDecodeJob(ids[n]));
+	for (unsigned n = 0; n < order.size(); ++n) work.push_back(FVitaSoundDecodeJob(order[n].second, &bulk, n));
 	std::vector<FVitaLoadJob *> jobs(work.size());
 	for (unsigned n = 0; n < work.size(); ++n) jobs[n] = &work[n];
 	FVitaLoadPoolStats stats;

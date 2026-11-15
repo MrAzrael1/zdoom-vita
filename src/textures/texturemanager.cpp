@@ -60,32 +60,34 @@
 #include "posix/vita_debug.h"
 #include "posix/vita_perf.h"
 #include "posix/vita_loadpool.h"
+#include "posix/vita_bulkread.h"
+#include <algorithm>
 #include <unordered_set>
 #include <vector>
 
-// Reads a texture's lump on the game thread; decodes it on any core.
+// Fetches a texture's lump (still compressed) on the game thread through the
+// bulk reader; inflates and decodes it on any core.
 class FVitaTextureDecodeJob : public FVitaLoadJob
 {
 	FTexture *Tex;
-	int Lump;
-	BYTE *Data;
-	long Length;
+	FVitaBulkReader *Bulk;
+	unsigned Index;
+	FVitaRawLump Raw;
 public:
-	FVitaTextureDecodeJob(FTexture *tex, int lump) : Tex(tex), Lump(lump), Data(NULL), Length(0) {}
-	~FVitaTextureDecodeJob() { delete[] Data; }
+	FVitaTextureDecodeJob(FTexture *tex, FVitaBulkReader *bulk, unsigned index) : Tex(tex), Bulk(bulk), Index(index) { Raw.data = NULL; }
+	~FVitaTextureDecodeJob() { delete[] Raw.data; }
 	size_t Read()
 	{
-		Length = Wads.LumpLength(Lump);
-		if (Length <= 0) return 0;
-		Data = new BYTE[Length];
-		Wads.ReadLump(Lump, Data);
-		return size_t(Length);
+		Bulk->Fetch(Index, Raw);
+		return size_t(Raw.size);
 	}
 	void Decode()
 	{
-		if (Data != NULL) Tex->VitaDecodeFromMemory(Data, Length);
-		delete[] Data;
-		Data = NULL;
+		long length;
+		BYTE *data = I_VitaUnpackLump(Raw, length);
+		// On corrupt data the texture stays unloaded and decodes normally later.
+		if (data != NULL) Tex->VitaDecodeFromMemory(data, length);
+		delete[] data;
 	}
 };
 size_t I_VitaPrecacheBudget(bool pixels);
@@ -1379,15 +1381,26 @@ void FTextureManager::PrecacheLevel (void)
 		}
 		if (!pending.empty())
 		{
+			// Fetch in file order so neighbouring lumps share one large read.
+			std::vector<std::pair<std::pair<const void *, long>, size_t> > order(pending.size());
+			for (size_t n = 0; n < pending.size(); ++n)
+			{
+				I_VitaLumpPosition(pending[n].second, order[n].first.first, order[n].first.second);
+				order[n].second = n;
+			}
+			std::stable_sort(order.begin(), order.end());
+			std::vector<int> lumps(pending.size());
+			for (size_t n = 0; n < order.size(); ++n) lumps[n] = pending[order[n].second].second;
+			FVitaBulkReader bulk(lumps);
 			std::vector<FVitaTextureDecodeJob> work;	// never reallocated once filled
 			work.reserve(pending.size());
-			for (size_t n = 0; n < pending.size(); ++n) work.push_back(FVitaTextureDecodeJob(pending[n].first, pending[n].second));
+			for (size_t n = 0; n < order.size(); ++n) work.push_back(FVitaTextureDecodeJob(pending[order[n].second].first, &bulk, unsigned(n)));
 			std::vector<FVitaLoadJob *> jobs(work.size());
 			for (size_t n = 0; n < work.size(); ++n) jobs[n] = &work[n];
 			FVitaLoadPoolStats stats;
 			I_VitaRunLoadJobs(jobs.data(), unsigned(jobs.size()), stats);
-			I_VitaTrace("[Vita] Parallel PNG decode: %u textures in %.0f ms (reading %.0f ms, decoding %.0f ms across cores, game thread decoded %u)\n",
-				stats.jobs, stats.wallMs, stats.readMs, stats.decodeMs, stats.mainDecoded);
+			I_VitaTrace("[Vita] Parallel PNG decode: %u textures in %.0f ms (reading %.0f ms in %u bulk reads + %u single, decoding %.0f ms across cores, game thread decoded %u)\n",
+				stats.jobs, stats.wallMs, stats.readMs, bulk.BulkReads(), bulk.Fallbacks(), stats.decodeMs, stats.mainDecoded);
 		}
 	}
 	I_VitaLoadMark(VLOAD_TEXTURES);

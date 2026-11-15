@@ -1770,6 +1770,13 @@ OptionValue "VitaRenderSizes"
 	3, "960x544 (1.00x)"
 }
 
+OptionValue "VitaFrameCaps"
+{
+	30, "30 fps"
+	60, "60 fps"
+	0, "Unlimited"
+}
+
 OptionMenu "VitaSettings"
 {
 	Title "VITA SETTINGS"
@@ -1779,6 +1786,10 @@ OptionMenu "VitaSettings"
 	Slider "HUD scale (%)", "vita_hudscale", 25, 150, 5, 0
 	StaticText " "
 	Option "Show FPS", "vid_fps", "OnOff"
+	Option "Frame rate cap", "vita_framecap", "VitaFrameCaps"
+	Option "Vertical sync", "vid_vsync", "OnOff"
+	StaticText "VSYNC REMOVES TEARING; SLOW FRAMES"
+	StaticText "THEN WAIT FOR THE NEXT REFRESH."
 	StaticText " "
 	Option "Rear Touchpad Weapon Switch", "vita_rearweapons", "OnOff"
 	StaticText " "

@@ -215,6 +215,9 @@ public:
 	int GetNumWads () const;
 
 	int AddExternalFile(const char *filename);
+#ifdef ZD_VITA
+	struct FResourceLump *VitaGetLump(int lump) const;	// NULL if out of range
+#endif
 
 protected:
 

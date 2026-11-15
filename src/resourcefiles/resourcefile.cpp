@@ -677,3 +677,15 @@ int FExternalLump::FillCache()
 	return 1;
 }
 
+#ifdef ZD_VITA
+bool FUncompressedLump::VitaGetRawInfo(VitaRawInfo &info)
+{
+	if (Cache != NULL || Owner == NULL || Owner->Reader == NULL || Owner->Reader->GetBuffer() != NULL || LumpSize <= 0) return false;
+	info.reader = Owner->Reader;
+	info.start = Position;
+	info.readSize = info.compressedSize = LumpSize;
+	info.deflated = false;
+	info.localHeader = false;
+	return true;
+}
+#endif

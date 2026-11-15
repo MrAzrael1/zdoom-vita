@@ -120,6 +120,22 @@ struct FZipLump : public FResourceLump
 
 	virtual FileReader *GetReader();
 	virtual int FillCache();
+#ifdef ZD_VITA
+	virtual bool VitaGetRawInfo(VitaRawInfo &info)
+	{
+		if (Cache != NULL || Owner->Reader == NULL || Owner->Reader->GetBuffer() != NULL || LumpSize <= 0) return false;
+		if (Method != METHOD_STORED && Method != METHOD_DEFLATE) return false;
+		info.reader = Owner->Reader;
+		info.compressedSize = CompressedSize;
+		info.deflated = Method == METHOD_DEFLATE;
+		info.start = Position;
+		info.localHeader = (Flags & LUMPFZIP_NEEDFILESTART) != 0;
+		// The local header's name usually matches the central directory's;
+		// its extra field is unknown, so leave generous slack.
+		info.readSize = CompressedSize + (info.localHeader ? long(sizeof(FZipLocalFileHeader)) + long(FullName.Len()) + 512 : 0);
+		return true;
+	}
+#endif
 
 private:
 	void SetLumpAddress();

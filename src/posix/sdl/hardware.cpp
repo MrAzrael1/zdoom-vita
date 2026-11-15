@@ -34,6 +34,10 @@
 */
 
 #include <SDL.h>
+#ifdef ZD_VITA
+#include <psp2/kernel/threadmgr.h>
+#include <psp2/display.h>
+#endif
 #include <signal.h>
 #include <time.h>
 
@@ -212,26 +216,69 @@ EXTERN_CVAR(Int, vid_maxfps);
 EXTERN_CVAR(Bool, cl_capfps);
 
 #if defined(ZD_VITA)
-// A failed POSIX SIGEV_THREAD timer would leave the frame semaphore unsignaled.
-// Use SDL's monotonic millisecond clock and delay directly on Vita.
-static int VitaFPSLimit;
-static Uint32 VitaPreviousFrame;
+// A failed POSIX SIGEV_THREAD timer would leave the frame semaphore unsignaled,
+// so the Vita paces frames itself, from the performance counter. The cap is
+// vita_framecap (Vita Settings: 30 / 60 / unlimited) rather than vid_maxfps,
+// and frames are scheduled against fixed deadlines so the rate does not drift
+// (whole-millisecond sleeps made "60" run at 62.5 fps).
+CUSTOM_CVAR(Int, vita_framecap, 60, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+{
+	if (self < 0) self = 0;
+	else if (self != 0 && self < 20) self = 20;
+	else if (self > 240) self = 240;
+}
+
+static Uint64 VitaNextFrame;
+static int VitaLastVcount;
+static bool VitaVcountValid;
+EXTERN_CVAR(Bool, vid_vsync);
 
 void I_SetFPSLimit(int limit)
 {
-	VitaFPSLimit = limit < 0 ? (int)vid_maxfps : limit;
-	VitaPreviousFrame = 0;
+	// cl_capfps (35 fps, no interpolation) turns the limiter off; anything
+	// else restarts pacing from the next frame.
+	VitaNextFrame = 0;
 }
 
 void I_WaitForFPSLimit()
 {
-	if (VitaFPSLimit <= 0) return;
-	Uint32 interval = 1000 / VitaFPSLimit;
-	Uint32 now = SDL_GetTicks();
-	Uint32 elapsed = now - VitaPreviousFrame;
-	if (VitaPreviousFrame != 0 && elapsed < interval)
-		SDL_Delay(interval - elapsed);
-	VitaPreviousFrame = SDL_GetTicks();
+	const int cap = vita_framecap;
+	if (vid_vsync)
+	{
+		// With vsync every frame is shown from a vertical refresh (59.94 Hz).
+		// At 60 or unlimited the renderer's own vsync paces frames. Lower caps
+		// hold each frame for a whole number of refreshes, counted on the
+		// display's own counter so the cadence never beats against a timer
+		// (30 fps = every second refresh).
+		VitaNextFrame = 0;
+		const int refreshes = (cap <= 0 || cap >= 60) ? 1 : (60 + cap / 2) / cap;
+		if (refreshes <= 1) { VitaVcountValid = false; return; }
+		if (VitaVcountValid)
+		{
+			const int target = VitaLastVcount + refreshes;
+			while (sceDisplayGetVcount() - target < 0) sceDisplayWaitVblankStart();
+		}
+		VitaLastVcount = sceDisplayGetVcount();
+		VitaVcountValid = true;
+		return;
+	}
+	VitaVcountValid = false;
+	if (cap <= 0) { VitaNextFrame = 0; return; }
+	const Uint64 freq = SDL_GetPerformanceFrequency();
+	const Uint64 interval = freq / cap;
+	Uint64 now = SDL_GetPerformanceCounter();
+	// First frame, or more than a frame behind (a load, a hitch): restart the
+	// schedule instead of rushing frames out to catch up.
+	if (VitaNextFrame == 0 || now >= VitaNextFrame + interval) VitaNextFrame = now;
+	while (now < VitaNextFrame)
+	{
+		const Uint64 remaining = (VitaNextFrame - now) * 1000000 / freq;	// microseconds
+		// Sleep most of the wait (other threads keep running), then spin the
+		// last fraction of a millisecond for an even frame rate.
+		if (remaining > 600) sceKernelDelayThread(SceUInt(remaining - 400));
+		now = SDL_GetPerformanceCounter();
+	}
+	VitaNextFrame += interval;
 }
 #elif !defined(__APPLE__)
 Semaphore FPSLimitSemaphore;

@@ -44,6 +44,21 @@ struct FResourceLump
 	virtual FileReader *NewReader();
 	virtual int GetFileOffset() { return -1; }
 	virtual int GetIndexNum() const { return 0; }
+#ifdef ZD_VITA
+	// Where this lump's bytes sit in its container, so map loads can fetch
+	// many lumps with a few large sequential reads (posix/vita_bulkread.cpp).
+	// 'start' and 'readSize' are positions in 'reader'; with localHeader the
+	// range begins at a zip local file header (with slack for its variable
+	// part) that must be skipped. Returns false for lumps that can only be
+	// read through FillCache (already cached, in memory, other compression).
+	struct VitaRawInfo
+	{
+		FileReader *reader;
+		long start, readSize, compressedSize;
+		bool deflated, localHeader;
+	};
+	virtual bool VitaGetRawInfo(VitaRawInfo &info) { return false; }
+#endif
 	void LumpNameSetup(FString iname);
 	void CheckEmbedded();
 
@@ -97,6 +112,9 @@ struct FUncompressedLump : public FResourceLump
 	virtual FileReader *GetReader();
 	virtual int FillCache();
 	virtual int GetFileOffset() { return Position; }
+#ifdef ZD_VITA
+	virtual bool VitaGetRawInfo(VitaRawInfo &info);
+#endif
 
 };
 
