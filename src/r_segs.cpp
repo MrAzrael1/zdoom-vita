@@ -53,6 +53,7 @@
 #include "v_palette.h"
 #include "r_data/colormaps.h"
 #include "r_cornershade.h"
+#include "dsectoreffect.h"
 
 #define WALLYREPEAT 8
 
@@ -1772,9 +1773,14 @@ void transmaskwallscan (int x1, int x2, short *uwal, short *dwal, fixed_t *swal,
 static void R_RecordCornerSeams (int x1, int x2)
 {
 	const bool solidmid = midtexture != NULL && midtexture->UseType != FTexture::TEX_Null;
-	const bool floorseam = markfloor && frontsector->GetTexture(sector_t::floor) != skyflatnum &&
+	// Floors/ceilings that are moving right now (doors, lifts, crushers) are
+	// skipped: their corners slide with the moving surface, which reads as a
+	// dark band showing through the door or around the platform.
+	const bool floormoving = (DSectorEffect *)frontsector->floordata != NULL;
+	const bool ceilmoving = (DSectorEffect *)frontsector->ceilingdata != NULL;
+	const bool floorseam = !floormoving && markfloor && frontsector->GetTexture(sector_t::floor) != skyflatnum &&
 		(midtexture != NULL ? solidmid : (bottomtexture != NULL && bottomtexture->UseType != FTexture::TEX_Null));
-	const bool ceilseam = markceiling && frontsector->GetTexture(sector_t::ceiling) != skyflatnum &&
+	const bool ceilseam = !ceilmoving && markceiling && frontsector->GetTexture(sector_t::ceiling) != skyflatnum &&
 		(midtexture != NULL ? solidmid : (toptexture != NULL && toptexture->UseType != FTexture::TEX_Null));
 	if (!floorseam && !ceilseam) return;
 
@@ -1802,14 +1808,14 @@ static void R_RecordCornerSeams (int x1, int x2)
 			const float h = ff1 + (ff2 - ff1) * u;
 			const float dy = ff1 * k1 + (ff2 * k2 - ff1 * k1) * u;	// rows below the horizon
 			const int top = midtexture != NULL ? walltop[x] : MAX (MIN (walllower[x], wallbottom[x]), walltop[x]);
-			R_CornerShadeAdd (x, cy + dy, top, floorclip[x], h, dy, false);
+			R_CornerShadeAdd (x, cy + dy, top, floorclip[x], ceilingclip[x], h, dy, false);
 		}
 		if (ceilseam)
 		{
 			const float h = fc1 + (fc2 - fc1) * u;
 			const float dy = fc1 * k1 + (fc2 * k2 - fc1 * k1) * u;	// rows above the horizon
 			const int bottom = midtexture != NULL ? wallbottom[x] : MIN (MAX (wallupper[x], walltop[x]), wallbottom[x]);
-			R_CornerShadeAdd (x, cy - dy, bottom, ceilingclip[x], h, dy, true);
+			R_CornerShadeAdd (x, cy - dy, bottom, ceilingclip[x], floorclip[x], h, dy, true);
 		}
 	}
 }

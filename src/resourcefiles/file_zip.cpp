@@ -41,6 +41,9 @@
 #include "w_zip.h"
 #include "i_system.h"
 #include "ancientzip.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 #define BUFREADCOMMENT (0x400)
 
@@ -335,6 +338,9 @@ FileReader *FZipLump::GetReader()
 
 int FZipLump::FillCache()
 {
+#ifdef ZD_VITA
+	FVitaLoadScope vitaUnpack(VLOAD_ZIP);
+#endif
 	if (Flags & LUMPFZIP_NEEDFILESTART) SetLumpAddress();
 	const char *buffer;
 

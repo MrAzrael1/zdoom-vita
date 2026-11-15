@@ -81,6 +81,19 @@ protected:
 	DWORD StartOfIDAT;
 
 	void MakeTexture ();
+	void MakeTextureFrom (FileReader *lump);
+
+#ifdef ZD_VITA
+public:
+	int VitaPendingDecodeLump() { return Pixels == NULL && SourceLump >= 0 ? SourceLump : -1; }
+	void VitaDecodeFromMemory(const BYTE *data, long length)
+	{
+		if (Pixels != NULL) return;
+		MemoryReader reader((const char *)data, length);
+		MakeTextureFrom(&reader);
+	}
+protected:
+#endif
 
 	friend class FTexture;
 };
@@ -470,7 +483,15 @@ void FPNGTexture::MakeTexture ()
 	{
 		lump = new FileReader(SourceFile.GetChars());
 	}
+	MakeTextureFrom(lump);
+	delete lump;
+}
 
+// Builds Pixels from an open PNG file. Touches only this texture (and the
+// read-only RGB32k table), so it can run on a loader thread when 'lump' is a
+// MemoryReader over data read on the game thread.
+void FPNGTexture::MakeTextureFrom (FileReader *lump)
+{
 	Pixels = new BYTE[Width*Height];
 	if (StartOfIDAT == 0)
 	{
@@ -635,7 +656,6 @@ void FPNGTexture::MakeTexture ()
 			delete[] tempix;
 		}
 	}
-	delete lump;
 }
 
 //===========================================================================

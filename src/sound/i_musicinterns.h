@@ -383,6 +383,9 @@ protected:
 
 	fluid_settings_t *FluidSettings;
 	fluid_synth_t *FluidSynth;
+#ifdef ZD_VITA
+	FString VitaKey;	// creation settings, for reusing the synth (empty = don't keep)
+#endif
 
 #ifdef DYN_FLUIDSYNTH
 	enum { FLUID_FAILED = -1, FLUID_OK = 0 };

@@ -85,6 +85,10 @@
 #include <zlib.h>
 
 #include "g_hub.h"
+#ifdef ZD_VITA
+#include "posix/vita_debug.h"
+#include "posix/vita_perf.h"
+#endif
 
 
 static FRandom pr_dmspawn ("DMSpawn");
@@ -2170,6 +2174,9 @@ static void PutSavePic (FILE *file, int width, int height)
 void G_DoSaveGame (bool okForQuicksave, FString filename, const char *description)
 {
 	char buf[100];
+#ifdef ZD_VITA
+	const Uint64 vitaSaveStart = SDL_GetPerformanceCounter();
+#endif
 
 	// Do not even try, if we're not in a level. (Can happen after
 	// a demo finishes playback.)
@@ -2259,6 +2266,10 @@ void G_DoSaveGame (bool okForQuicksave, FString filename, const char *descriptio
 	{
 		if (longsavemessages) Printf ("%s (%s)\n", GStrings("GGSAVED"), filename.GetChars());
 		else Printf ("%s\n", GStrings("GGSAVED"));
+#ifdef ZD_VITA
+		I_VitaTrace ("[Vita] Save %s took %.0f ms\n", filename.GetChars(),
+			(SDL_GetPerformanceCounter() - vitaSaveStart) * 1000.0 / SDL_GetPerformanceFrequency());
+#endif
 	}
 	else Printf(PRINT_HIGH, "Save failed\n");
 

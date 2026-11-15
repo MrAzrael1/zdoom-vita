@@ -34,6 +34,10 @@ CUSTOM_CVAR(Int, vita_cornershade_size, 16, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 	else if (self > 64) self = 64;
 }
 
+// Diagnostic: paints floor-seam shading red and ceiling-seam shading green,
+// so a screenshot shows exactly which seams shade which pixels. Console only.
+CVAR(Bool, vita_cornershade_debug, false, 0)
+
 bool CornerShadeRecording;
 
 namespace
@@ -50,6 +54,7 @@ namespace
 		short planeBegin, planeEnd;	// rows on the floor/ceiling side
 		short wallBegin, wallEnd;	// rows on the wall side
 		float planeStep, wallStep;	// fraction of the gradient per row
+		bool ceiling;
 	};
 
 	struct FCornerArgs
@@ -62,6 +67,8 @@ namespace
 
 	FCornerSeam Seams[MAX_SEAMS];
 	int SeamCount;
+	bool DebugColors;
+	BYTE DebugFloor, DebugCeiling;
 	float GradientUnits;
 	float InvFocalY;
 	int MaxRows;
@@ -117,7 +124,7 @@ namespace
 		return int(t * t * NUM_LEVELS + 0.5f);
 	}
 
-	void ShadeRows(BYTE *column, int pitch, int y, int begin, int end, float step, int bandBegin, int bandEnd)
+	void ShadeRows(BYTE *column, int pitch, int y, int begin, int end, float step, int bandBegin, int bandEnd, int debugColor)
 	{
 		if (begin < bandBegin) begin = bandBegin;
 		if (end > bandEnd) end = bandEnd;
@@ -128,7 +135,7 @@ namespace
 			if (level > 0)
 			{
 				BYTE *p = column + row * pitch;
-				*p = Tables[level][*p];
+				*p = debugColor >= 0 ? BYTE(debugColor) : Tables[level][*p];
 			}
 		}
 	}
@@ -140,8 +147,9 @@ namespace
 		{
 			const FCornerSeam &s = a.seams[i];
 			BYTE *column = a.destorg + s.x;
-			ShadeRows(column, a.pitch, s.y, s.planeBegin, s.planeEnd, s.planeStep, bandBegin, bandEnd);
-			ShadeRows(column, a.pitch, s.y, s.wallBegin, s.wallEnd, s.wallStep, bandBegin, bandEnd);
+			const int debugColor = DebugColors ? (s.ceiling ? DebugCeiling : DebugFloor) : -1;
+			ShadeRows(column, a.pitch, s.y, s.planeBegin, s.planeEnd, s.planeStep, bandBegin, bandEnd, debugColor);
+			ShadeRows(column, a.pitch, s.y, s.wallBegin, s.wallEnd, s.wallStep, bandBegin, bandEnd, debugColor);
 		}
 	}
 }
@@ -154,12 +162,18 @@ void R_CornerShadeBeginView()
 	CornerShadeRecording = vita_cornershade && fixedcolormap == NULL && FocalLengthY > 0;
 	if (!CornerShadeRecording) return;
 	UpdateTables();
+	DebugColors = vita_cornershade_debug;
+	if (DebugColors)
+	{
+		DebugFloor = ColorMatcher.Pick(255, 0, 0);
+		DebugCeiling = ColorMatcher.Pick(0, 255, 0);
+	}
 	GradientUnits = float(int(vita_cornershade_size));
 	InvFocalY = 65536.f / float(FocalLengthY);
 	MaxRows = viewheight / 2 > 1 ? viewheight / 2 : 1;
 }
 
-void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, float height, float dy, bool ceiling)
+void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, int oppositeLimit, float height, float dy, bool ceiling)
 {
 	if (SeamCount >= MAX_SEAMS) return;
 	if (height < 1.f || dy < 1.f) return;
@@ -169,10 +183,18 @@ void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, float h
 	else if (seamY > 16384.f) seamY = 16384.f;
 	const int y = int(floorf(seamY));
 
-	// A seam hidden behind nearer geometry (the bottom edge of an opening door,
-	// the lip of a lowered lift) is skipped: shading the visible wall beside it
-	// would show as a dark band through the opening. Only seams hidden by the
-	// edge of the view still shade the wall next to them.
+	// Rows [clipTop, clipBottom) of this column were still uncovered when the
+	// seam was recorded; everything outside is nearer geometry drawn earlier.
+	const int clipTop = ceiling ? planeLimit : oppositeLimit;
+	const int clipBottom = ceiling ? oppositeLimit : planeLimit;
+
+	// A seam hidden behind nearer geometry is skipped, whether that geometry is
+	// above it (an opening door covering the floor of the room behind) or below
+	// it (the lip of a lowered lift): shading next to it would show as dark
+	// lines on that geometry or through the opening. Only seams hidden by the
+	// edge of the view still shade the visible rows next to them.
+	if (y < clipTop && clipTop > 0) return;
+	if (y > clipBottom && clipBottom < viewheight) return;
 	if (ceiling ? (y <= planeLimit && planeLimit > 0) : (y >= planeLimit && planeLimit < viewheight)) return;
 
 	// Rows per map unit: vertically on the wall at this depth, and in depth on
@@ -201,6 +223,11 @@ void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, float h
 		planeBegin = y;
 		planeEnd = MIN(planeLimit, y + pr);
 	}
+	// Never shade outside the rows that were uncovered for this column.
+	planeBegin = MAX(planeBegin, clipTop);
+	planeEnd = MIN(planeEnd, clipBottom);
+	wallBegin = MAX(wallBegin, clipTop);
+	wallEnd = MIN(wallEnd, clipBottom);
 	if (planeBegin >= planeEnd) planeBegin = planeEnd = 0;
 	if (wallBegin >= wallEnd) wallBegin = wallEnd = 0;
 	if (planeBegin == planeEnd && wallBegin == wallEnd) return;
@@ -214,6 +241,7 @@ void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, float h
 	s.planeEnd = short(planeEnd);
 	s.wallBegin = short(wallBegin);
 	s.wallEnd = short(wallEnd);
+	s.ceiling = ceiling;
 }
 
 void R_CornerShadeApply()

@@ -26,7 +26,9 @@ void R_CornerShadeBeginView();
 //           rows from the seam down to wallLimit (visible bottom of the wall)
 // height is the camera's distance above the floor / below the ceiling and dy
 // the seam's distance in rows from the horizon, both positive when visible.
-void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, float height, float dy, bool ceiling);
+// oppositeLimit is the other clip (ceilingclip for floors, floorclip for
+// ceilings); together they bound the rows still uncovered in this column.
+void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, int oppositeLimit, float height, float dy, bool ceiling);
 
 // Before R_DrawMasked: queue the darkening pass and stop recording.
 void R_CornerShadeApply();

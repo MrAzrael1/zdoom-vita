@@ -87,6 +87,9 @@
 #include "gi.h"
 
 #include "g_hub.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 void STAT_StartNewGame(const char *lev);
 void STAT_ChangeLevel(const char *newl);
@@ -887,6 +890,9 @@ void G_DoLoadLevel (int position, bool autosave)
 	static int lastposition = 0;
 	gamestate_t oldgs = gamestate;
 	int i;
+#ifdef ZD_VITA
+	I_VitaLoadBegin ();
+#endif
 
 	if (NextSkill >= 0)
 	{
@@ -967,6 +973,9 @@ void G_DoLoadLevel (int position, bool autosave)
 	}
 
 	level.maptime = 0;
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_PREP);
+#endif
 	P_SetupLevel (level.MapName, position);
 
 	AM_LevelInit();
@@ -1025,6 +1034,10 @@ void G_DoLoadLevel (int position, bool autosave)
 		C_HideConsole ();
 
 	C_FlushDisplay ();
+
+#ifdef ZD_VITA
+	I_VitaLoadEnd (level.MapName.GetChars());
+#endif
 
 	// [RH] Always save the game when entering a new level.
 	if (autosave && !savegamerestore && disableautosave < 1)

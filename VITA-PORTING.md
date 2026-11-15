@@ -833,3 +833,74 @@ within the budgets. Sound budgets use exact lengths for already-decoded sounds
 and the existing conservative estimate otherwise, with the post-decode recount
 kept. Joystick settings are now written into GameConfig before each periodic
 Vita config save (upstream only saved them from destructors at shutdown).
+
+### v0.13.0 corner shading (fake ambient occlusion)
+
+src/r_cornershade.cpp darkens pixels on both sides of every visible seam where
+a drawn wall tier meets its front sector's floor or ceiling. R_RenderSegLoop
+records seam columns after wall clipping and before the tiers update
+ceilingclip/floorclip (so those bound the visible plane rows); skies, 3D-floor
+fake passes and missing textures are skipped. The gradient length is a fixed
+world distance: rows per unit are dy/height on the wall and dy^2/(height*FocalY)
+on the foreshortened plane, with a quadratic falloff into 8 darkness levels.
+Darkening uses palette remap tables (ColorMatcher, rebuilt when strength or the
+palette changes) on the finished 8-bit view. R_RenderActorView queues the pass
+as one banded command after planes, skyboxes and mirrors and before
+R_DrawMasked, so sprites are unaffected and the draw workers split the rows.
+Disabled under special colormaps. Vita Settings: on/off, strength 1-10 (7% per
+step at the seam), size 4-32 map units. Wall-to-wall inside corners are not
+covered yet.
+
+Corner shading follow-up: seams are now projected to their true rows from the
+wall depth (WallC.sz, InvZtoScale, as WallMost does) instead of the screen-
+clamped walltop/wallbottom, so a seam just off screen or behind nearer
+geometry still shades the visible wall beside it. Palette entries at or above
+vita_cornershade_highlight percent luminance (default 80, 100 = off) map to
+themselves in every darkening table, so bright texels such as light fixtures
+are not darkened.
+
+Corner shading defaults: off, strength 6, size 16. Seams hidden behind nearer
+geometry (y beyond floorclip/ceilingclip when that clip is not the view edge)
+are skipped again, since shading the wall beside them showed as dark bands
+through opening doors and past lift lips; seams hidden only by the view edge
+still shade the visible wall.
+
+### v0.13.0 map-load profile
+
+Every G_DoLoadLevel now traces two lines (always on, not gated by
+vita_profile): sequential stages timed with marks (prep, map data, nodes,
+blockmap/reject/grouping, thing spawning, specials/polyobjects, map texture
+precache, effect-sprite preload, map sound precache, effect-sound preload,
+finish), and overlapping totals for FileReader reads, pk3 lump unpacking
+(FZipLump::FillCache, including its reads), PNG decoding and sound decoding.
+Kept effect sounds are now cached after the map's own sounds so the two can
+be timed separately. G_DoSaveGame traces its duration (autosaves on map entry
+appeared as ~1.5 s frames).
+
+### v0.13.0 load-time fixes 1 and 2
+
+The first load profile (Boltgun on Doom 2) showed map01 at 30.2 s and MAP02 at
+4.2 s (resident effects), with effect sounds taking 14.9 s against 6.2 s of
+decoding: S_VitaPrecacheBytes read and unpacked each whole lump to estimate
+its PCM size, then S_LoadSound read and unpacked it again. Effect sounds are
+now decoded once and measured exactly; measured sizes (or "cannot preload")
+are remembered per sfx so later maps skip non-fitting sounds without
+decoding. Selection order and budget accounting are unchanged.
+
+"mapdata" (1.4 s on every map) included S_Start, which creates a new
+FluidSynth MIDI device per song and reloaded gm.sf2 from the memory card each
+time. On Vita the destroyed device's synth and settings are kept as a spare
+and handed to the next device when everything fixed at creation (rate, gain,
+reverb/chorus on, polyphony, threads, patch sets) matches; runtime reverb,
+chorus and interpolation settings are re-applied. The load profile now splits
+music (S_Start) and scripts (ACS/translators/dialogues) from map data.
+
+Second load profile (Boltgun + SCYTHE): map01 25.0 s, MAP02 2.8 s, MAP03 2.7 s;
+music 30-60 ms with the reused FluidSynth. Every later map still spent ~2.35 s
+re-decoding ~930 PNG lumps in the effect-sprite stage although kept effects
+should already be cached. Since the stock pass is the only Unload path, a
+likely cause is a kept texture object reachable through a second texture
+index that is neither hit nor kept, so it was unloaded there and decoded
+again. The stock pass now never unloads a texture object that is in the kept
+set, and the effect preload line reports decoded=N (with the first few names
+and use types) and shared-skips=N to confirm.

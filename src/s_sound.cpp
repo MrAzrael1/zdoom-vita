@@ -53,6 +53,8 @@
 #include "farchive.h"
 #ifdef ZD_VITA
 #include "posix/vita_debug.h"
+#include "posix/vita_perf.h"
+#include "posix/vita_loadpool.h"
 #include "sound/vita_vorbis.h"
 #include <algorithm>
 #include <vector>
@@ -473,25 +475,126 @@ void S_Start ()
 //==========================================================================
 
 #ifdef ZD_VITA
-// Estimate retained PCM before decoding. Unsupported/ambiguous formats stay lazy.
-static size_t S_VitaPrecacheBytes(sfxinfo_t &sound)
+// Retained PCM bytes of each effect sound once it has been decoded, so later
+// maps can skip sounds that will not fit without decoding them again.
+// 0 = not known yet; size_t(-1) = cannot be preloaded (too large, or a format
+// the sound backend could not decode).
+static std::vector<size_t> VitaEffectSoundBytes;
+
+// Reads a sound lump on the game thread; decodes it on any core. Decode
+// mirrors the format dispatch of S_LoadSound, and the sound renderer's
+// LoadSound* calls only build a new sample.
+class FVitaSoundDecodeJob : public FVitaLoadJob
 {
-	int length = Wads.LumpLength(sound.lumpnum);
-	if (length <= 0 || length > 1024*1024) return size_t(-1);
-	if (sound.bLoadRAW) return size_t(length)*4;
-	std::vector<BYTE> data(length);
-	FWadLump lump = Wads.OpenLumpNum(sound.lumpnum);
-	lump.Read(data.data(), length);
-	size_t bytes;
-	if (length >= 4 && !memcmp(data.data(), "OggS", 4))
-		return VitaVorbisPCMBytes(data.data(), length, bytes) ? bytes : size_t(-1);
-	if (length >= 8 && data[0] == 3 && data[1] == 0)
-		return size_t(length)*4; // Conservative stereo reservation for mono DMX.
-	// PCM WAV expands by at most 2x for 8-bit input. The deliberately larger
-	// reserve covers SDL's other WAV decoders without decoding just to reject.
-	if (length >= 12 && !memcmp(data.data(), "RIFF", 4) && !memcmp(data.data()+8, "WAVE", 4))
-		return size_t(length)*16;
-	return size_t(-1);
+public:
+	unsigned Id;
+	SoundHandle Result;
+private:
+	int Lump, Length, RawRate, LoopStart;
+	bool Raw;
+	BYTE *Data;
+public:
+	FVitaSoundDecodeJob(unsigned id) : Id(id), Data(NULL)
+	{
+		sfxinfo_t &sfx = S_sfx[id];
+		Result.data = NULL;
+		Lump = sfx.lumpnum;
+		Length = 0;
+		Raw = sfx.bLoadRAW;
+		RawRate = sfx.RawRate;
+		LoopStart = sfx.LoopStart;
+	}
+	~FVitaSoundDecodeJob() { delete[] Data; }
+	size_t Read()
+	{
+		Length = Wads.LumpLength(Lump);
+		if (Length <= 0) return 0;
+		Data = new BYTE[Length];
+		Wads.ReadLump(Lump, Data);
+		return size_t(Length);
+	}
+	void Decode()
+	{
+		if (Data != NULL && Length >= 8)
+		{
+			SDWORD dmxlen = LittleLong(((SDWORD *)Data)[1]);
+			if (strncmp((const char *)Data, "Creative Voice File", 19) == 0)
+				Result = GSnd->LoadSoundVoc(Data, Length);
+			else if (Raw)
+				Result = GSnd->LoadSoundRaw(Data, Length, RawRate, 1, 8, LoopStart);
+			else if (Data[0] == 3 && Data[1] == 0 && dmxlen <= Length - 8)
+			{
+				int frequency = LittleShort(((WORD *)Data)[1]);
+				if (frequency == 0) frequency = 11025;
+				Result = GSnd->LoadSoundRaw(Data + 8, dmxlen, frequency, 1, 8, LoopStart);
+			}
+			else
+				Result = GSnd->LoadSound(Data, Length);
+		}
+		delete[] Data;
+		Data = NULL;
+	}
+};
+
+// Decodes up to a batch of the not-yet-measured effect candidates starting at
+// 'from' on all three cores, storing each result in its sfx and its PCM size
+// in VitaEffectSoundBytes (size_t(-1) if it could not be decoded). Sounds
+// whose lump is shared with another sound are left to S_LoadSound, which
+// links them instead of decoding twice. Marks every candidate it looked at
+// in 'tried' and every sound it decoded in 'fresh'.
+static void S_VitaDecodeSoundBatch(const std::vector<unsigned> &candidates, unsigned from,
+	std::vector<char> &tried, std::vector<char> &fresh, FVitaLoadPoolStats &total)
+{
+	enum { BATCH = 64 };
+	std::vector<unsigned> ids;
+	std::vector<int> lumps;
+	for (unsigned k = from; k < candidates.size() && ids.size() < BATCH; ++k)
+	{
+		if (tried[k]) continue;
+		const unsigned id = candidates[k];
+		sfxinfo_t &sfx = S_sfx[id];
+		if (sfx.data.isValid() || VitaEffectSoundBytes[id] != 0) continue;
+		const int length = Wads.LumpLength(sfx.lumpnum);
+		if (length <= 0 || length > 1024*1024) continue;
+		tried[k] = 1;
+		bool shared = std::find(lumps.begin(), lumps.end(), sfx.lumpnum) != lumps.end();
+		for (unsigned i = 1; i < S_sfx.Size() && !shared; ++i)
+		{
+			shared = S_sfx[i].data.isValid() && S_sfx[i].link == sfxinfo_t::NO_LINK && S_sfx[i].lumpnum == sfx.lumpnum;
+		}
+		if (shared) continue;
+		lumps.push_back(sfx.lumpnum);
+		ids.push_back(id);
+	}
+	if (ids.empty()) return;
+
+	std::vector<FVitaSoundDecodeJob> work;	// never reallocated once filled
+	work.reserve(ids.size());
+	for (unsigned n = 0; n < ids.size(); ++n) work.push_back(FVitaSoundDecodeJob(ids[n]));
+	std::vector<FVitaLoadJob *> jobs(work.size());
+	for (unsigned n = 0; n < work.size(); ++n) jobs[n] = &work[n];
+	FVitaLoadPoolStats stats;
+	I_VitaRunLoadJobs(jobs.data(), unsigned(jobs.size()), stats);
+	total.jobs += stats.jobs;
+	total.mainDecoded += stats.mainDecoded;
+	total.readMs += stats.readMs;
+	total.wallMs += stats.wallMs;
+	total.decodeMs += stats.decodeMs;
+
+	for (unsigned n = 0; n < work.size(); ++n)
+	{
+		sfxinfo_t &sfx = S_sfx[work[n].Id];
+		if (work[n].Result.isValid())
+		{
+			sfx.data = work[n].Result;
+			VitaEffectSoundBytes[work[n].Id] = size_t(GSnd->GetSampleLength(sfx.data)) * 4u;
+			fresh[work[n].Id] = 1;
+		}
+		else
+		{
+			VitaEffectSoundBytes[work[n].Id] = size_t(-1);
+		}
+	}
 }
 #endif
 void S_PrecacheLevel ()
@@ -553,29 +656,108 @@ void S_PrecacheLevel ()
 				if (afile != bfile) return afile > bfile;
 				return Wads.LumpLength(S_sfx[a].lumpnum) < Wads.LumpLength(S_sfx[b].lumpnum);
 			});
+			if (VitaEffectSoundBytes.size() < S_sfx.Size()) VitaEffectSoundBytes.resize(S_sfx.Size(), 0);
+			std::vector<char> tried(candidates.size(), 0), fresh(S_sfx.Size(), 0);
+			FVitaLoadPoolStats poolTotal = {};
 			for (unsigned n = 0; n < candidates.size(); ++n)
 			{
-				sfxinfo_t &sound = S_sfx[candidates[n]];
-				bool cached = sound.data.isValid();
-				// Exact size for sounds kept from the last map; a conservative
-				// estimate (no decoding) for the rest.
-				size_t size = cached ? size_t(GSnd->GetSampleLength(sound.data)) * 4u
-					: S_VitaPrecacheBytes(sound);
-				if (size > vitaBudget - bytes) { ++vitaSkipped; continue; }
+				const unsigned id = candidates[n];
+				sfxinfo_t &sound = S_sfx[id];
+				size_t &known = VitaEffectSoundBytes[id];
+				bool decodedNow = false;
+				size_t size;
+				if (fresh[id] && sound.data.isValid())
+				{
+					size = known;	// decoded by a parallel batch just now
+					decodedNow = true;
+				}
+				else if (sound.data.isValid())
+				{
+					size = size_t(GSnd->GetSampleLength(sound.data)) * 4u;	// kept from the last map
+					++vitaRetained;
+				}
+				else if (known != 0)
+				{
+					size = known;	// measured on an earlier map
+				}
+				else
+				{
+					// Decode once and measure. This used to read and unpack the
+					// whole lump just to estimate its size, then read and unpack it
+					// again to decode it.
+					const int length = Wads.LumpLength(sound.lumpnum);
+					if (length <= 0 || length > 1024*1024 || bytes >= vitaBudget)
+					{
+						if (length <= 0 || length > 1024*1024) known = size_t(-1);
+						++vitaSkipped;
+						continue;
+					}
+					// Decode this and the next unmeasured candidates on all cores.
+					if (!tried[n])
+					{
+						S_VitaDecodeSoundBatch(candidates, n, tried, fresh, poolTotal);
+						if (fresh[id] && sound.data.isValid())
+						{
+							size = known;
+							decodedNow = true;
+							goto vitaHaveSize;
+						}
+						if (known == size_t(-1)) continue;	// could not be decoded
+					}
+					// Shares its lump with another sound: S_LoadSound links it.
+					sfxinfo_t *actual = S_LoadSound(&sound);
+					if (actual != &sound || !sound.data.isValid())
+					{
+						// Aliased to another sound with identical data, or undecodable.
+						if (actual == &sound) known = size_t(-1);
+						continue;
+					}
+					size = known = size_t(GSnd->GetSampleLength(sound.data)) * 4u;
+					decodedNow = true;
+				}
+vitaHaveSize:
+				if (size > vitaBudget - bytes)
+				{
+					if (decodedNow) S_UnloadSound(&sound);
+					else if (sound.data.isValid()) --vitaRetained;
+					++vitaSkipped;
+					continue;
+				}
 				bytes += size;
-				if (cached) ++vitaRetained;
 				sound.bUsed = true;
-				vitaKeep.push_back(candidates[n]);
+				vitaKeep.push_back(id);
+			}
+			if (poolTotal.jobs != 0)
+			{
+				I_VitaTrace("[Vita] Parallel sound decode: %u sounds in %.0f ms (reading %.0f ms, decoding %.0f ms across cores, game thread decoded %u)\n",
+					poolTotal.jobs, poolTotal.wallMs, poolTotal.readMs, poolTotal.decodeMs, poolTotal.mainDecoded);
 			}
 		}
 #endif
+#ifdef ZD_VITA
+		I_VitaLoadMark(VLOAD_EFFECT_SOUNDS);	// choosing which effects to keep
+		// The map's own sounds first, then the kept effects, so the load
+		// profile can tell them apart.
+		std::vector<char> vitaIsKeep(S_sfx.Size(), 0);
+		for (unsigned n = 0; n < vitaKeep.size(); ++n) vitaIsKeep[vitaKeep[n]] = 1;
+#endif
 		for (i = 1; i < S_sfx.Size(); ++i)
 		{
+#ifdef ZD_VITA
+			if (vitaIsKeep[i]) continue;
+#endif
 			if (S_sfx[i].bUsed)
 			{
 				S_CacheSound (&S_sfx[i]);
 			}
 		}
+#ifdef ZD_VITA
+		I_VitaLoadMark(VLOAD_SOUNDS);
+		for (unsigned n = 0; n < vitaKeep.size(); ++n)
+		{
+			S_CacheSound (&S_sfx[vitaKeep[n]]);
+		}
+#endif
 		for (i = 1; i < S_sfx.Size(); ++i)
 		{
 			if (!S_sfx[i].bUsed && S_sfx[i].link == sfxinfo_t::NO_LINK)
@@ -609,6 +791,7 @@ void S_PrecacheLevel ()
 			I_VitaTrace("[Vita] Preload: sounds=%u (kept from last map %u) PCM=%u KiB of %u KiB budget-skipped=%u\n",
 				loaded, vitaRetained, unsigned(bytes/1024), unsigned(vitaBudget/1024), vitaSkipped);
 		}
+		I_VitaLoadMark(VLOAD_EFFECT_SOUNDS);
 #endif
 
 	}

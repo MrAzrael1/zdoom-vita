@@ -58,6 +58,36 @@
 #include "info.h"
 #include "r_state.h"
 #include "posix/vita_debug.h"
+#include "posix/vita_perf.h"
+#include "posix/vita_loadpool.h"
+#include <unordered_set>
+#include <vector>
+
+// Reads a texture's lump on the game thread; decodes it on any core.
+class FVitaTextureDecodeJob : public FVitaLoadJob
+{
+	FTexture *Tex;
+	int Lump;
+	BYTE *Data;
+	long Length;
+public:
+	FVitaTextureDecodeJob(FTexture *tex, int lump) : Tex(tex), Lump(lump), Data(NULL), Length(0) {}
+	~FVitaTextureDecodeJob() { delete[] Data; }
+	size_t Read()
+	{
+		Length = Wads.LumpLength(Lump);
+		if (Length <= 0) return 0;
+		Data = new BYTE[Length];
+		Wads.ReadLump(Lump, Data);
+		return size_t(Length);
+	}
+	void Decode()
+	{
+		if (Data != NULL) Tex->VitaDecodeFromMemory(Data, Length);
+		delete[] Data;
+		Data = NULL;
+	}
+};
 size_t I_VitaPrecacheBudget(bool pixels);
 #endif
 
@@ -1310,6 +1340,57 @@ void FTextureManager::PrecacheLevel (void)
 			effectBytes += size;
 		}
 	}
+	// A texture can draw its pixels from another texture object: a TEXTURES
+	// definition with one same-sized patch redirects to that patch, which has
+	// its own index (usually not hit and not an effect). The stock pass would
+	// unload the patch, so every map re-decoded it (seen as ~900 sprites per
+	// map with Boltgun), and the map's own redirected sprites were freed again
+	// right after being precached when the patch came later in the loop.
+	// Keep the redirect targets of everything that is hit or kept.
+	std::unordered_set<FTexture *> keptTextures;
+	unsigned sharedSkips = 0;
+	for (int i = 0; i < cnt; ++i)
+	{
+		if (!hitlist[i] && !(effects != NULL && effects[i])) continue;
+		FTexture *tex = ByIndex(i);
+		if (tex == NULL) continue;
+		FTexture *target = tex->GetRedirect(false);
+		if (target != NULL && target != tex) keptTextures.insert(target);
+	}
+	I_VitaLoadMark(VLOAD_EFFECT_SPRITES);	// choosing which effects to keep
+
+	// Decode every PNG that the map and the kept effects need on all three
+	// cores before the passes below, which then find the pixels cached. The
+	// game thread reads the lumps (FileReader is single-threaded) while the
+	// loader threads decode.
+	{
+		std::unordered_set<FTexture *> queued;
+		std::vector<std::pair<FTexture *, int> > pending;
+		for (int i = cnt - 1; i >= 0; i--)	// same order as the stock pass
+		{
+			if (!hitlist[i] && !(effects != NULL && effects[i])) continue;
+			FTexture *tex = ByIndex(i);
+			if (tex == NULL) continue;
+			FTexture *target = tex->GetRedirect(false);
+			if (target == NULL) continue;
+			const int lump = target->VitaPendingDecodeLump();
+			if (lump < 0 || !queued.insert(target).second) continue;
+			pending.push_back(std::make_pair(target, lump));
+		}
+		if (!pending.empty())
+		{
+			std::vector<FVitaTextureDecodeJob> work;	// never reallocated once filled
+			work.reserve(pending.size());
+			for (size_t n = 0; n < pending.size(); ++n) work.push_back(FVitaTextureDecodeJob(pending[n].first, pending[n].second));
+			std::vector<FVitaLoadJob *> jobs(work.size());
+			for (size_t n = 0; n < work.size(); ++n) jobs[n] = &work[n];
+			FVitaLoadPoolStats stats;
+			I_VitaRunLoadJobs(jobs.data(), unsigned(jobs.size()), stats);
+			I_VitaTrace("[Vita] Parallel PNG decode: %u textures in %.0f ms (reading %.0f ms, decoding %.0f ms across cores, game thread decoded %u)\n",
+				stats.jobs, stats.wallMs, stats.readMs, stats.decodeMs, stats.mainDecoded);
+		}
+	}
+	I_VitaLoadMark(VLOAD_TEXTURES);
 #endif
 
 	for (int i = cnt - 1; i >= 0; i--)
@@ -1317,24 +1398,42 @@ void FTextureManager::PrecacheLevel (void)
 #ifdef ZD_VITA
 		// Kept effects are loaded below; don't unload them here.
 		if (effects != NULL && effects[i]) continue;
+		if (!hitlist[i] && !keptTextures.empty() && keptTextures.count(ByIndex(i)))
+		{
+			++sharedSkips;
+			continue;
+		}
 #endif
 		Renderer->PrecacheTexture(ByIndex(i), hitlist[i]);
 	}
 
 #ifdef ZD_VITA
+	I_VitaLoadMark(VLOAD_TEXTURES);
 	if (effects != NULL)
 	{
 		// Already-cached pixels from the previous map make this a no-op.
+		// Count what still had to be decoded, naming the first few, so the
+		// trace shows whether keeping effects between maps is working.
+		unsigned decoded = 0;
+		FString examples;
 		for (int i = 0; i < cnt; ++i)
 		{
 			if (!effects[i]) continue;
-			ByIndex(i)->GetPixels();
+			FTexture *tex = ByIndex(i);
+			const unsigned before = I_VitaPNGDecodeCount();
+			tex->GetPixels();
+			if (I_VitaPNGDecodeCount() != before)
+			{
+				if (++decoded <= 6) examples.AppendFormat(" %s(%d)", tex->Name.GetChars(), int(tex->UseType));
+			}
 			++effectKept;
 		}
 		delete[] effects;
-		I_VitaTrace("[Vita] Preload: effect sprites=%u pixels=%u KiB of %u KiB budget-skipped=%u\n",
-			effectKept, unsigned(effectBytes/1024), unsigned(effectBudget/1024), effectSkipped);
+		I_VitaTrace("[Vita] Preload: effect sprites=%u pixels=%u KiB of %u KiB budget-skipped=%u decoded=%u patches-kept=%u%s%s\n",
+			effectKept, unsigned(effectBytes/1024), unsigned(effectBudget/1024), effectSkipped,
+			decoded, sharedSkips, decoded ? " e.g." : "", examples.GetChars());
 	}
+	I_VitaLoadMark(VLOAD_EFFECT_SPRITES);
 #endif
 
 	delete[] hitlist;

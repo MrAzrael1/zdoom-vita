@@ -42,6 +42,9 @@
 #include "i_system.h"
 #include "templates.h"
 #include "m_misc.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 
 //==========================================================================
@@ -141,6 +144,9 @@ long FileReader::Read (void *buffer, long len)
 {
 	assert(len >= 0);
 	if (len <= 0) return 0;
+#ifdef ZD_VITA
+	FVitaLoadScope vitaRead(VLOAD_FILE_READ);
+#endif
 	if (FilePos + len > StartPos + Length)
 	{
 		len = Length - FilePos + StartPos;

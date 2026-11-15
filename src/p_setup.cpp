@@ -70,6 +70,9 @@
 #include "r_data/colormaps.h"
 
 #include "fragglescript/t_fs.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
 
 #define MISSING_TEXTURE_WARN_LIMIT		20
 
@@ -3576,7 +3579,13 @@ void P_SetupLevel (const char *lumpname, int position)
 	players[consoleplayer].viewz = 1; 
 
 	// Make sure all sounds are stopped before Z_FreeTags.
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_MAPDATA);
+#endif
 	S_Start ();
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_MUSIC);
+#endif
 	// [RH] Clear all ThingID hash chains.
 	AActor::ClearTIDHashes ();
 
@@ -3615,6 +3624,9 @@ void P_SetupLevel (const char *lumpname, int position)
 		ForceNodeBuild = gennodes;
 
 		// [RH] Load in the BEHAVIOR lump
+#ifdef ZD_VITA
+		I_VitaLoadMark (VLOAD_MAPDATA);
+#endif
 		FBehavior::StaticUnloadModules ();
 		if (map->HasBehavior)
 		{
@@ -3678,6 +3690,9 @@ void P_SetupLevel (const char *lumpname, int position)
 		FBehavior::StaticLoadDefaultModules ();
 
 		P_LoadStrifeConversations (map, lumpname);
+#ifdef ZD_VITA
+		I_VitaLoadMark (VLOAD_SCRIPTS);
+#endif
 
 		FMissingTextureTracker missingtex;
 
@@ -3740,6 +3755,9 @@ void P_SetupLevel (const char *lumpname, int position)
 		level.maptype = MAPTYPE_BUILD;
 	}
 	bool reloop = false;
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_MAPDATA);
+#endif
 
 	if (!ForceNodeBuild)
 	{
@@ -3928,6 +3946,9 @@ void P_SetupLevel (const char *lumpname, int position)
 		hasglnodes = P_CheckForGLNodes();
 	}
 
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_NODES);
+#endif
 	times[10].Clock();
 	P_LoadBlockMap (map);
 	times[10].Unclock();
@@ -3943,6 +3964,9 @@ void P_SetupLevel (const char *lumpname, int position)
 	times[13].Clock();
 	P_FloodZones ();
 	times[13].Unclock();
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_BLOCKMAP);
+#endif
 
 	if (hasglnodes)
 	{
@@ -3997,6 +4021,9 @@ void P_SetupLevel (const char *lumpname, int position)
 	{
 		delete[] oldvertextable;
 	}
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_THINGS);
+#endif
 
 	// set up world state
 	P_SpawnSpecials ();
@@ -4067,12 +4094,15 @@ void P_SetupLevel (const char *lumpname, int position)
 	// [RH] Remove all particles
 	P_ClearParticles ();
 
+#ifdef ZD_VITA
+	I_VitaLoadMark (VLOAD_SPECIALS);
+#endif
 	times[17].Clock();
 	// preload graphics and sounds
 	if (precache)
 	{
-		TexMan.PrecacheLevel ();
-		S_PrecacheLevel ();
+		TexMan.PrecacheLevel ();	// marks VLOAD_TEXTURES / VLOAD_EFFECT_SPRITES on Vita
+		S_PrecacheLevel ();			// marks VLOAD_SOUNDS / VLOAD_EFFECT_SOUNDS on Vita
 	}
 	times[17].Unclock();
 

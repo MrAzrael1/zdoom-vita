@@ -214,6 +214,14 @@ public:
 	virtual int GetSourceLump() { return SourceLump; }
 	virtual FTexture *GetRedirect(bool wantwarped);
 	virtual FTexture *GetRawTexture();		// for FMultiPatchTexture to override
+#ifdef ZD_VITA
+	// Parallel map-load decoding (posix/vita_loadpool.h). A texture whose
+	// pixels can be built from an in-memory copy of its lump returns that lump
+	// while its pixels are not loaded, and -1 otherwise. VitaDecodeFromMemory
+	// may run on a loader thread and must only touch this texture.
+	virtual int VitaPendingDecodeLump() { return -1; }
+	virtual void VitaDecodeFromMemory(const BYTE *data, long length) {}
+#endif
 
 	virtual void Unload () = 0;
 

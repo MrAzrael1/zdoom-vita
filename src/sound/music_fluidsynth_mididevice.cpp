@@ -258,6 +258,35 @@ CUSTOM_CVAR(Int, fluid_chorus_type, FLUID_CHORUS_DEFAULT_TYPE, CVAR_ARCHIVE|CVAR
 		currSong->FluidSettingInt("z.chorus-changed", 0);
 }
 
+#if defined(ZD_VITA) && !defined(DYN_FLUIDSYNTH)
+#define VITA_REUSE_FLUIDSYNTH
+// Creating a synth loads the whole SoundFont from the memory card, and a new
+// MIDI device is created for every song, so every map change reloaded the
+// bank (about 1.4 s with a typical gm.sf2). The last synth is kept when its
+// device is destroyed and handed to the next device if everything fixed at
+// creation (rate, gain, effects, polyphony, patch sets) is unchanged.
+static fluid_settings_t *VitaSpareSettings;
+static fluid_synth_t *VitaSpareSynth;
+static FString VitaSpareKey;
+
+static FString VitaSynthKey(int rate, const char *args)
+{
+	FString key;
+	key.Format("%d|%g|%d|%d|%d|%d|%s|%s", rate, double(*fluid_gain), int(*fluid_reverb), int(*fluid_chorus),
+		int(*fluid_voices), int(*fluid_threads), args != NULL ? args : "", *fluid_patchset);
+	return key;
+}
+
+static void VitaDropSpareSynth()
+{
+	if (VitaSpareSynth != NULL) delete_fluid_synth(VitaSpareSynth);
+	if (VitaSpareSettings != NULL) delete_fluid_settings(VitaSpareSettings);
+	VitaSpareSynth = NULL;
+	VitaSpareSettings = NULL;
+	VitaSpareKey = "";
+}
+#endif
+
 // CODE --------------------------------------------------------------------
 
 //==========================================================================
@@ -274,6 +303,37 @@ FluidSynthMIDIDevice::FluidSynthMIDIDevice(const char *args)
 	if (!LoadFluidSynth())
 	{
 		return;
+	}
+#endif
+#ifdef VITA_REUSE_FLUIDSYNTH
+	{
+		int rate = fluid_samplerate;
+		if (rate < 22050 || rate > 96000)
+		{
+			rate = clamp((int)GSnd->GetOutputRate(), 22050, 96000);
+		}
+		FString key = VitaSynthKey(rate, args);
+		if (VitaSpareSynth != NULL && key.Compare(VitaSpareKey) == 0)
+		{
+			SampleRate = rate;
+			FluidSettings = VitaSpareSettings;
+			FluidSynth = VitaSpareSynth;
+			VitaKey = key;
+			VitaSpareSettings = NULL;
+			VitaSpareSynth = NULL;
+			VitaSpareKey = "";
+			// Runtime-adjustable settings, applied as for a new synth.
+			fluid_synth_set_interp_method(FluidSynth, -1, fluid_interp);
+			fluid_synth_set_reverb(FluidSynth, fluid_reverb_roomsize, fluid_reverb_damping,
+				fluid_reverb_width, fluid_reverb_level);
+			fluid_synth_set_chorus(FluidSynth, fluid_chorus_voices, fluid_chorus_level,
+				fluid_chorus_speed, fluid_chorus_depth, fluid_chorus_type);
+			I_VitaTrace("[Vita] FluidSynth: reusing loaded SoundFont\n");
+			return;
+		}
+		// Settings changed: free the old bank before loading another.
+		VitaDropSpareSynth();
+		VitaKey = key;
 	}
 #endif
 	FluidSettings = new_fluid_settings();
@@ -366,6 +426,18 @@ FluidSynthMIDIDevice::FluidSynthMIDIDevice(const char *args)
 FluidSynthMIDIDevice::~FluidSynthMIDIDevice()
 {
 	Close();
+#ifdef VITA_REUSE_FLUIDSYNTH
+	// Close() has stopped the stream, so the audio thread no longer uses the
+	// synth. Keep it (and its loaded SoundFont) for the next song.
+	if (FluidSynth != NULL && FluidSettings != NULL && VitaSpareSynth == NULL && !VitaKey.IsEmpty())
+	{
+		VitaSpareSynth = FluidSynth;
+		VitaSpareSettings = FluidSettings;
+		VitaSpareKey = VitaKey;
+		FluidSynth = NULL;
+		FluidSettings = NULL;
+	}
+#endif
 	if (FluidSynth != NULL)
 	{
 		delete_fluid_synth(FluidSynth);

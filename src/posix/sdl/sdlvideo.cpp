@@ -904,11 +904,67 @@ static Uint64 VitaPerfTotals[VPERF_COUNT], VitaPerfCurrent[VPERF_COUNT];
 static Uint64 VitaPerfWorst[VPERF_COUNT], VitaPerfWindowStart, VitaPerfMaxFrame;
 static unsigned VitaPerfFrames, VitaPerfSlowFrames, VitaPerfSpritesCurrent;
 static unsigned VitaPerfSpritesTotal, VitaPerfSpritesPeak, VitaPerfSpritesWorst;
+bool VitaLoadActive;
+static Uint64 VitaLoadTotals[VLOAD_COUNT], VitaLoadStart, VitaLoadLastMark;
+static unsigned VitaLoadReads, VitaLoadZipLumps;
+static SDL_threadID VitaGameThread;
+void I_VitaLoadBegin()
+{
+	VitaGameThread = SDL_ThreadID();
+	memset(VitaLoadTotals, 0, sizeof(VitaLoadTotals));
+	VitaLoadReads = VitaLoadZipLumps = 0;
+	VitaLoadStart = VitaLoadLastMark = SDL_GetPerformanceCounter();
+	VitaLoadActive = true;
+}
+void I_VitaLoadMark(EVitaLoadStage stage)
+{
+	if (!VitaLoadActive) return;
+	Uint64 now = SDL_GetPerformanceCounter();
+	VitaLoadTotals[stage] += now - VitaLoadLastMark;
+	VitaLoadLastMark = now;
+}
+void I_VitaLoadAdd(EVitaLoadStage stage, Uint64 start)
+{
+	if (!VitaLoadActive || !start) return;
+	VitaLoadTotals[stage] += SDL_GetPerformanceCounter() - start;
+	if (stage == VLOAD_FILE_READ) ++VitaLoadReads;
+	else if (stage == VLOAD_ZIP) ++VitaLoadZipLumps;
+}
+void I_VitaLoadEnd(const char *mapname)
+{
+	if (!VitaLoadActive) return;
+	I_VitaLoadMark(VLOAD_FINISH);
+	VitaLoadActive = false;
+	const double ms = 1000.0 / SDL_GetPerformanceFrequency();
+	const Uint64 *t = VitaLoadTotals;
+	I_VitaTrace("[Vita] Load %s: total=%.0f ms; prep=%.0f music=%.0f mapdata=%.0f scripts=%.0f nodes=%.0f blockmap=%.0f things=%.0f specials=%.0f "
+		"textures=%.0f effect-sprites=%.0f sounds=%.0f effect-sounds=%.0f finish=%.0f ms\n",
+		mapname, (VitaLoadLastMark - VitaLoadStart) * ms,
+		t[VLOAD_PREP]*ms, t[VLOAD_MUSIC]*ms, t[VLOAD_MAPDATA]*ms, t[VLOAD_SCRIPTS]*ms, t[VLOAD_NODES]*ms, t[VLOAD_BLOCKMAP]*ms, t[VLOAD_THINGS]*ms,
+		t[VLOAD_SPECIALS]*ms, t[VLOAD_TEXTURES]*ms, t[VLOAD_EFFECT_SPRITES]*ms, t[VLOAD_SOUNDS]*ms,
+		t[VLOAD_EFFECT_SOUNDS]*ms, t[VLOAD_FINISH]*ms);
+	I_VitaTrace("[Vita] Load %s overlapping: file-read=%.0f ms (%u reads) pk3-unpack=%.0f ms (%u lumps) PNG-decode=%.0f ms sound-decode=%.0f ms\n",
+		mapname, t[VLOAD_FILE_READ]*ms, VitaLoadReads, t[VLOAD_ZIP]*ms, VitaLoadZipLumps,
+		t[VLOAD_PNG]*ms, t[VLOAD_SOUND_DECODE]*ms);
+}
+static unsigned VitaPNGDecodes;
+unsigned I_VitaPNGDecodeCount() { return VitaPNGDecodes; }
 void I_VitaPerfAdd(EVitaPerfStage stage, Uint64 start)
 {
+	// Asset decoding can run on the loader threads during a map load; their
+	// time is reported by the parallel decode trace instead, and these
+	// counters are only ever written by the game thread.
+	if ((stage == VPERF_PNG_LOAD || stage == VPERF_SOUND_LOAD) && VitaGameThread != 0 && SDL_ThreadID() != VitaGameThread) return;
+	if (stage == VPERF_PNG_LOAD) ++VitaPNGDecodes;
 	if (start)
 	{
 		Uint64 elapsed = SDL_GetPerformanceCounter() - start;
+		if (VitaLoadActive)
+		{
+			if (stage == VPERF_PNG_LOAD) VitaLoadTotals[VLOAD_PNG] += elapsed;
+			else if (stage == VPERF_SOUND_LOAD) VitaLoadTotals[VLOAD_SOUND_DECODE] += elapsed;
+		}
+		if (!I_VitaPerfEnabled()) return;
 		VitaPerfTotals[stage] += elapsed;
 		VitaPerfCurrent[stage] += elapsed;
 	}

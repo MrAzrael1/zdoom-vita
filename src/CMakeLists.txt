@@ -633,7 +633,7 @@ set( PLAT_SDL_SOURCES
 	posix/sdl/sdlvideo.cpp
 	posix/sdl/st_start.cpp )
 if( VITA )
-	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES} posix/vita_launcher.cpp )
+	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES} posix/vita_launcher.cpp posix/vita_loadpool.cpp )
 	add_definitions( -DNO_CRASHCATCHER -DZD_VITA=1 )
 	# newlib's malloc heap is one fixed memory block reserved at boot; VitaSDK's
 	# default is only 128 MiB. The VPK requests the extended 365 MiB main-memory
