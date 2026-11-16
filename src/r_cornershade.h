@@ -14,6 +14,9 @@
 
 // True between R_CornerShadeBeginView and R_CornerShadeApply when enabled.
 extern bool CornerShadeRecording;
+// Rows per map unit below which a wall is too far away for any of its seams
+// to shade a row; R_RenderSegLoop skips such segs entirely.
+extern float CornerShadeMinRowsPerUnit;
 
 // Start of R_RenderActorView (after R_SetupFrame and the queue window).
 void R_CornerShadeBeginView();
@@ -24,11 +27,22 @@ void R_CornerShadeBeginView();
 //           seam, floor rows from the seam down to planeLimit (floorclip)
 // ceilings: ceiling rows from planeLimit (ceilingclip) down to the seam, wall
 //           rows from the seam down to wallLimit (visible bottom of the wall)
-// height is the camera's distance above the floor / below the ceiling and dy
-// the seam's distance in rows from the horizon, both positive when visible.
-void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, float height, float dy, bool ceiling);
+// rowsPerUnit is the wall's screen rows per map unit in this column and dy
+// the seam's distance in rows from the horizon (positive when visible); the
+// caller has already checked the camera is at least a unit from the plane.
+// oppositeLimit is the other clip (ceilingclip for floors, floorclip for
+// ceilings); together they bound the rows still uncovered in this column.
+void R_CornerShadeAdd(int x, float seamY, int wallLimit, int planeLimit, int oppositeLimit, float rowsPerUnit, float dy, bool ceiling);
 
 // Before R_DrawMasked: queue the darkening pass and stop recording.
 void R_CornerShadeApply();
+
+// Profiling (performance-counter ticks): time spent recording seams on the
+// game thread, added by R_RenderSegLoop's caller.
+void R_CornerShadeAddRecordTicks(unsigned long long ticks);
+// Totals since the previous call: recording (game thread) and shading
+// (summed over the threads that ran it) in ms, seams and views. False if the
+// effect did not run.
+bool R_CornerShadeTakeStats(double &recordMs, double &kernelMs, unsigned &seams, unsigned &views);
 
 #endif

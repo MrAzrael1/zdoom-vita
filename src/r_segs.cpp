@@ -53,6 +53,10 @@
 #include "v_palette.h"
 #include "r_data/colormaps.h"
 #include "r_cornershade.h"
+#ifdef ZD_VITA
+#include "posix/vita_perf.h"
+#endif
+#include "dsectoreffect.h"
 
 #define WALLYREPEAT 8
 
@@ -1772,9 +1776,14 @@ void transmaskwallscan (int x1, int x2, short *uwal, short *dwal, fixed_t *swal,
 static void R_RecordCornerSeams (int x1, int x2)
 {
 	const bool solidmid = midtexture != NULL && midtexture->UseType != FTexture::TEX_Null;
-	const bool floorseam = markfloor && frontsector->GetTexture(sector_t::floor) != skyflatnum &&
+	// Floors/ceilings that are moving right now (doors, lifts, crushers) are
+	// skipped: their corners slide with the moving surface, which reads as a
+	// dark band showing through the door or around the platform.
+	const bool floormoving = (DSectorEffect *)frontsector->floordata != NULL;
+	const bool ceilmoving = (DSectorEffect *)frontsector->ceilingdata != NULL;
+	const bool floorseam = !floormoving && markfloor && frontsector->GetTexture(sector_t::floor) != skyflatnum &&
 		(midtexture != NULL ? solidmid : (bottomtexture != NULL && bottomtexture->UseType != FTexture::TEX_Null));
-	const bool ceilseam = markceiling && frontsector->GetTexture(sector_t::ceiling) != skyflatnum &&
+	const bool ceilseam = !ceilmoving && markceiling && frontsector->GetTexture(sector_t::ceiling) != skyflatnum &&
 		(midtexture != NULL ? solidmid : (toptexture != NULL && toptexture->UseType != FTexture::TEX_Null));
 	if (!floorseam && !ceilseam) return;
 
@@ -1789,6 +1798,10 @@ static void R_RecordCornerSeams (int x1, int x2)
 	const float vz = viewz / 65536.f;
 	const float k1 = float(InvZtoScale) / (16.f * float(WallC.sz1));
 	const float k2 = float(InvZtoScale) / (16.f * float(WallC.sz2));
+	// k is rows per map unit at each end; the nearer end has the larger one.
+	// A seg too far away for any shading row is skipped without touching its
+	// columns (most segs in big open areas).
+	if (MAX (k1, k2) < CornerShadeMinRowsPerUnit) return;
 	const float ff1 = vz - rw_frontfz1 / 65536.f, ff2 = vz - rw_frontfz2 / 65536.f;	// camera above floor
 	const float fc1 = rw_frontcz1 / 65536.f - vz, fc2 = rw_frontcz2 / 65536.f - vz;	// ceiling above camera
 	const float span = WallC.sx2 > WallC.sx1 ? float(WallC.sx2 - WallC.sx1) : 1.f;
@@ -1797,19 +1810,26 @@ static void R_RecordCornerSeams (int x1, int x2)
 	{
 		float u = (x - WallC.sx1) / span;
 		u = u < 0.f ? 0.f : (u > 1.f ? 1.f : u);
+		const float k = k1 + (k2 - k1) * u;	// rows per map unit in this column
 		if (floorseam)
 		{
 			const float h = ff1 + (ff2 - ff1) * u;
 			const float dy = ff1 * k1 + (ff2 * k2 - ff1 * k1) * u;	// rows below the horizon
-			const int top = midtexture != NULL ? walltop[x] : MAX (MIN (walllower[x], wallbottom[x]), walltop[x]);
-			R_CornerShadeAdd (x, cy + dy, top, floorclip[x], h, dy, false);
+			if (h >= 1.f)
+			{
+				const int top = midtexture != NULL ? walltop[x] : MAX (MIN (walllower[x], wallbottom[x]), walltop[x]);
+				R_CornerShadeAdd (x, cy + dy, top, floorclip[x], ceilingclip[x], k, dy, false);
+			}
 		}
 		if (ceilseam)
 		{
 			const float h = fc1 + (fc2 - fc1) * u;
 			const float dy = fc1 * k1 + (fc2 * k2 - fc1 * k1) * u;	// rows above the horizon
-			const int bottom = midtexture != NULL ? wallbottom[x] : MIN (MAX (wallupper[x], walltop[x]), wallbottom[x]);
-			R_CornerShadeAdd (x, cy - dy, bottom, ceilingclip[x], h, dy, true);
+			if (h >= 1.f)
+			{
+				const int bottom = midtexture != NULL ? wallbottom[x] : MIN (MAX (wallupper[x], walltop[x]), wallbottom[x]);
+				R_CornerShadeAdd (x, cy - dy, bottom, ceilingclip[x], floorclip[x], k, dy, true);
+			}
 		}
 	}
 }
@@ -1903,7 +1923,16 @@ void R_RenderSegLoop ()
 
 	if (CornerShadeRecording && viewactive)
 	{
+#ifdef ZD_VITA
+		// Reading the clock is a system call on the Vita, so time one seg in
+		// eight and scale, rather than adding two calls to every seg.
+		static unsigned cornerSample;
+		const Uint64 cornerStart = (++cornerSample & 7) == 0 ? I_VitaPerfClock() : 0;
+#endif
 		R_RecordCornerSeams (x1, x2);
+#ifdef ZD_VITA
+		if (cornerStart) R_CornerShadeAddRecordTicks ((SDL_GetPerformanceCounter() - cornerStart) * 8);
+#endif
 	}
 
 	// draw the wall tiers

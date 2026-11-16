@@ -95,6 +95,7 @@ struct MiniModeInfo
 
 #ifdef ZD_VITA
 #include "r_draw_mt.h"
+#include "r_cornershade.h"
 void I_VitaTraceMemory(const char *when);
 #endif
 
@@ -986,6 +987,15 @@ void I_VitaPerfFrame(Uint64 start)
 		VitaPerfTotals[VPERF_R_WALLS]*ms, VitaPerfTotals[VPERF_R_PLANES]*ms, VitaPerfTotals[VPERF_R_MASKED]*ms,
 		VitaPerfWorst[VPERF_R_WALLS]*tickms, VitaPerfWorst[VPERF_R_PLANES]*tickms, VitaPerfWorst[VPERF_R_MASKED]*tickms,
 		VitaPerfWorst[VPERF_DRAW_WAIT]*tickms);
+	{
+		double recordMs, kernelMs;
+		unsigned seams, views;
+		if (R_CornerShadeTakeStats(recordMs, kernelMs, seams, views))
+		{
+			I_VitaTrace("[Vita] Corner shading: %.0f seams/frame; recording=%.2f ms/frame (game thread), shading=%.2f ms/frame (summed over threads)\n",
+				double(seams) / VitaPerfFrames, recordMs / VitaPerfFrames, kernelMs / VitaPerfFrames);
+		}
+	}
 	memset(VitaPerfTotals, 0, sizeof(VitaPerfTotals));
 	VitaPerfFrames = VitaPerfSlowFrames = VitaPerfSpritesTotal = VitaPerfSpritesPeak = 0;
 	VitaPerfMaxFrame = 0; VitaPerfWindowStart = now;
