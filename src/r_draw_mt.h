@@ -9,7 +9,7 @@
 // renderer. The band boundary is re-balanced every frame from worker load.
 //
 // The game thread keeps doing visibility work (BSP, clipping, sprite sorting)
-// and optionally owns a share of the rows itself (vita_drawmainshare).
+// and owns a share of the rows itself, tuned automatically (vita_drawshare).
 //
 // Anything that reads neighbouring pixels or writes the framebuffer outside
 // the queued drawers (fuzz, sloped/colored planes, fog boundaries, voxels)
@@ -147,6 +147,7 @@ struct FDrawerStats
 	unsigned frames, commands, syncs, busyMicros[2];
 	bool active;
 	int mainshare, worker1Percent;
+	bool mainshareAuto;
 };
 void R_DrawerTakeStats(FDrawerStats &out);
 

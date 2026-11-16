@@ -1798,9 +1798,7 @@ OptionMenu "VitaSettings"
 	StaticText "AT COST OF SLOWER MAP LOAD SPEEDS."
 	StaticText " "
 	Option "Multicore drawing", "vita_drawthreads", "OnOff"
-	Slider "Game thread draw share (/8)", "vita_drawmainshare", 0, 4, 1, 0
-	StaticText "(EXPERIMENTAL) DRAWS THE 3D VIEW ON CORES 1-2."
-	StaticText "SHARE 0 = WORKER CORES ONLY."
+	StaticText "DRAWS THE 3D VIEW ON ALL THREE CORES."
 	StaticText " "
 	Option "Corner shading", "vita_cornershade", "OnOff"
 	Slider "Corner shading strength", "vita_cornershade_strength", 1, 10, 1, 0

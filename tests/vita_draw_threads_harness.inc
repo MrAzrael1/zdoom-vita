@@ -304,7 +304,7 @@ void Compare(const char *where, int window)
 void RunWindow(int window, int numops, int mainshare, bool threads)
 {
 	vita_drawthreads = threads;
-	vita_drawmainshare = mainshare;
+	vita_drawshare = mainshare;
 	// Mostly the adaptive balance; sometimes extreme or random worker splits,
 	// and sometimes a view shorter than the canvas (rows below go to worker 2).
 	int pick = R(0, 9);

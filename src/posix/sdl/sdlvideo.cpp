@@ -1039,8 +1039,8 @@ void I_VitaPerfFrame(Uint64 start)
 		FDrawerStats ds;
 		R_DrawerTakeStats(ds);
 		double perFrame = 1.0 / VitaPerfFrames;
-		I_VitaTrace("[Vita] Draw threads: %s main-share=%d/8 worker-split=%d/%d; wait=%.2f ms/frame (worst %.2f); worker busy=%.2f/%.2f ms/frame; commands=%.0f syncs=%.1f per frame\n",
-			ds.active ? "on" : "off", ds.mainshare, ds.worker1Percent, 100 - ds.worker1Percent,
+		I_VitaTrace("[Vita] Draw threads: %s main-share=%d/8%s worker-split=%d/%d; wait=%.2f ms/frame (worst %.2f); worker busy=%.2f/%.2f ms/frame; commands=%.0f syncs=%.1f per frame\n",
+			ds.active ? "on" : "off", ds.mainshare, ds.mainshareAuto ? " (auto)" : "", ds.worker1Percent, 100 - ds.worker1Percent,
 			VitaPerfTotals[VPERF_DRAW_WAIT]*ms, VitaPerfWorst[VPERF_DRAW_WAIT]*tickms,
 			ds.busyMicros[0]/1000.0*perFrame, ds.busyMicros[1]/1000.0*perFrame,
 			ds.commands*perFrame, ds.syncs*perFrame);

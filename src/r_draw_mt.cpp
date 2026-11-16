@@ -42,11 +42,13 @@
 #endif
 
 CVAR(Bool, vita_drawthreads, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-// Eighths of the screen rows the game thread draws itself (0..4). 0 leaves all
-// drawing to the two worker cores while the game thread does visibility work.
-CUSTOM_CVAR(Int, vita_drawmainshare, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+// Eighths of the screen rows the game thread draws itself. -1 (default) tunes
+// it automatically (AutoTuneShare); 0..4 fixes it (console only). 0 leaves
+// all drawing to the two worker cores while the game thread does visibility
+// work. Replaces the old vita_drawmainshare menu slider.
+CUSTOM_CVAR(Int, vita_drawshare, -1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
-	if (self < 0) self = 0;
+	if (self < -1) self = -1;
 	else if (self > 4) self = 4;
 }
 
@@ -111,6 +113,7 @@ struct FConsumer
 	std::atomic<int> sleeping;
 	std::atomic<unsigned> busyMicros;	// for the profiler, taken every report
 	std::atomic<unsigned> windowMicros;	// drawing time in the current window, for balancing
+	mutable std::atomic<unsigned> jobMicros;	// part of windowMicros spent on parallel-rows jobs
 	SDL_sem *wake;
 	SDL_Thread *thread;
 	int index;
@@ -152,6 +155,74 @@ void AssignBands(int mainshare, int height)
 	Consumers[1].band.end = mainrows + w1rows;
 	Consumers[2].band.begin = mainrows + w1rows;
 	Consumers[2].band.end = MAXHEIGHT;
+}
+
+// Automatic game-thread share. Each view window the game thread does its
+// visibility work (BSP, walls, sprites) and also draws the top rows of the
+// view; the two workers draw the rest. Over each sample of windows the tuner
+// measures, directly:
+//   V    the game thread's own non-drawing work (window - its rows - waits)
+//   D    the total drawing work (game-thread rows plus both workers)
+//   wait time the game thread spent waiting for the workers
+// and moves the share one step when two samples in a row agree:
+//  - up, when the game thread waited for longer than one more step of rows
+//    would cost it (the workers are the bottleneck);
+//  - down, when the game thread hardly waited (it is the bottleneck) and
+//    handing a step of rows to the workers would still leave them done first.
+// Unlike comparing frame times between trial shares, these measurements stay
+// meaningful when the scene changes from one second to the next.
+int AutoShare = 0;		// current automatic share (0..4)
+int CurrentShare = 0;	// share used by the current window
+Uint64 WindowStartTicks, WindowWaitTicks, WindowMainDrawTicks, WindowJobTicks;
+
+struct FShareTuner
+{
+	enum { SAMPLE_WINDOWS = 30 };
+	double window = 0, wait = 0, mainDraw = 0, workers = 0;
+	unsigned count = 0;
+	int lastVote = 0;
+} Tuner;
+
+void AutoTuneShare(double windowMicros, double waitMicros, double mainDrawMicros, double workerMicros)
+{
+	FShareTuner &t = Tuner;
+	t.window += windowMicros;
+	t.wait += waitMicros;
+	t.mainDraw += mainDrawMicros;
+	t.workers += workerMicros;
+	if (++t.count < FShareTuner::SAMPLE_WINDOWS) return;
+	const double D = t.mainDraw + t.workers;
+	const double V = t.window - t.mainDraw - t.wait;
+	const double window = t.window, wait = t.wait, mainDraw = t.mainDraw;
+	t.window = t.wait = t.mainDraw = t.workers = 0;
+	t.count = 0;
+	if (D <= 0 || window <= 0) { t.lastVote = 0; return; }
+
+	// How much work one share step (1/8 of the rows) is: the game thread's
+	// rows (the top of the view) are often cheaper than average, so use
+	// what they actually cost when it has some.
+	double rowsPerWork = 1.0;
+	if (AutoShare > 0 && mainDraw > 0)
+	{
+		rowsPerWork = (AutoShare / 8.0) / (mainDraw / D);
+		if (rowsPerWork < 0.5) rowsPerWork = 0.5; else if (rowsPerWork > 2.0) rowsPerWork = 2.0;
+	}
+	const double step = D / 8.0 / rowsPerWork;
+	// One more step costs the game thread `step` and saves each worker
+	// step/2, so it only pays when the game thread waited longer than a step.
+	// One fewer step pays while the game thread would still finish last:
+	// (V + mainDraw - step) against (workers + step) / 2, with half a step of
+	// margin so the two rules never flip-flop around the same point.
+	const double gameThread = (V > 0 ? V : 0) + mainDraw, perWorker = (D - mainDraw) * 0.5;
+	int vote = 0;
+	if (AutoShare < 4 && wait > step) vote = 1;
+	else if (AutoShare > 0 && wait < window * 0.02 && gameThread - (perWorker + step * 0.5) > step * 0.5) vote = -1;
+	if (vote != 0 && vote == t.lastVote)
+	{
+		AutoShare += vote;
+		t.lastVote = 0;	// the next step needs two fresh samples
+	}
+	else t.lastVote = vote;
 }
 
 // Moves the worker boundary halfway towards the split that would have made
@@ -228,7 +299,12 @@ void Execute(const FDrawerCommand &cmd, const FConsumer &c)
 	case DK_JOB:
 		// The game thread runs its part of a job directly.
 		if (c.index != 0 && cmd.a.j.begin[c.index] < cmd.a.j.end[c.index])
+		{
+			const Uint64 start = SDL_GetPerformanceCounter();
 			cmd.a.j.fn(cmd.a.j.ctx, cmd.a.j.begin[c.index], cmd.a.j.end[c.index]);
+			const Uint64 ticks = SDL_GetPerformanceCounter() - start;
+			c.jobMicros.fetch_add(unsigned(ticks * 1000000 / SDL_GetPerformanceFrequency()), std::memory_order_relaxed);
+		}
 		break;
 	}
 }
@@ -249,6 +325,19 @@ void Drain(FConsumer &c, unsigned until)
 		if ((r & 31) == 0) c.readIndex.store(r, std::memory_order_release);
 	}
 	c.readIndex.store(r, std::memory_order_release);
+}
+
+// The game thread drawing its own rows, timed for the share tuner.
+void DrainMain(unsigned until)
+{
+	if (Consumers[0].band.Empty())
+	{
+		Drain(Consumers[0], until);	// just catches the read index up
+		return;
+	}
+	const Uint64 start = SDL_GetPerformanceCounter();
+	Drain(Consumers[0], until);
+	WindowMainDrawTicks += SDL_GetPerformanceCounter() - start;
 }
 
 int WorkerMain(void *data)
@@ -330,6 +419,7 @@ bool StartThreads()
 		c.sleeping.store(0);
 		c.busyMicros.store(0);
 		c.windowMicros.store(0);
+		c.jobMicros.store(0);
 		c.wake = NULL;
 		c.thread = NULL;
 	}
@@ -381,6 +471,7 @@ unsigned MinReadIndex(unsigned w)
 
 void WaitForWorkers(unsigned target, bool countAsDrawWait)
 {
+	const Uint64 tunerWaitStart = SDL_GetPerformanceCounter();
 #ifdef ZD_VITA
 	Uint64 waitStart = countAsDrawWait ? I_VitaPerfClock() : 0;
 #endif
@@ -395,6 +486,7 @@ void WaitForWorkers(unsigned target, bool countAsDrawWait)
 #ifdef ZD_VITA
 	I_VitaPerfAdd(VPERF_DRAW_WAIT, waitStart);
 #endif
+	WindowWaitTicks += SDL_GetPerformanceCounter() - tunerWaitStart;
 	(void)countAsDrawWait;
 }
 
@@ -406,16 +498,18 @@ void MakeRoom()
 	Publish();
 	RingLimit = MinReadIndex(LocalWrite) + RING_SIZE;
 	if (LocalWrite != RingLimit) return;
-	Drain(Consumers[0], LocalWrite);	// the game thread's own share first
+	DrainMain(LocalWrite);	// the game thread's own share first
 #ifdef ZD_VITA
 	Uint64 waitStart = I_VitaPerfClock();
 #endif
+	const Uint64 tunerWaitStart = SDL_GetPerformanceCounter();
 	int spins = 0;
 	while ((RingLimit = MinReadIndex(LocalWrite) + RING_SIZE) == LocalWrite)
 	{
 		WakeWorkers();
 		if (++spins > 256) { SDL_Delay(0); spins = 0; }
 	}
+	WindowWaitTicks += SDL_GetPerformanceCounter() - tunerWaitStart;
 #ifdef ZD_VITA
 	I_VitaPerfAdd(VPERF_DRAW_WAIT, waitStart);
 #endif
@@ -649,7 +743,10 @@ void R_BeginDrawerQueue()
 	// Workers are idle (the previous window ended with a full sync and every
 	// job was waited for), so bands can change here; they are published to
 	// the workers by the first WriteIndex store.
-	AssignBands(vita_drawmainshare, viewheight);
+	CurrentShare = vita_drawshare >= 0 ? int(vita_drawshare) : AutoShare;
+	AssignBands(CurrentShare, viewheight);
+	WindowStartTicks = SDL_GetPerformanceCounter();
+	WindowWaitTicks = WindowMainDrawTicks = WindowJobTicks = 0;
 	for (int w = 1; w < NUM_CONSUMERS; ++w) Consumers[w].windowMicros.store(0, std::memory_order_relaxed);
 	// The game thread may not have consumed during the previous window (no
 	// rows); everything before LocalWrite is already drawn by the workers.
@@ -666,10 +763,21 @@ void R_EndDrawerQueue()
 	if (WindowDepth > 0 && --WindowDepth > 0) return;
 	if (!WindowActive) return;
 	R_DrawerSync();
+	const Uint64 end = SDL_GetPerformanceCounter();
 	WindowActive = false;
 	ArenaUsed = 0;
 	++DrawerFrameArenaGeneration;
+	const unsigned jobMicros = Consumers[1].jobMicros.exchange(0, std::memory_order_relaxed)
+		+ Consumers[2].jobMicros.exchange(0, std::memory_order_relaxed);
+	unsigned workerMicros = Consumers[1].windowMicros.load(std::memory_order_relaxed)
+		+ Consumers[2].windowMicros.load(std::memory_order_relaxed);
+	workerMicros = workerMicros > jobMicros ? workerMicros - jobMicros : 0;
 	Rebalance();
+	if (vita_drawshare < 0)
+	{
+		const double us = 1000000.0 / SDL_GetPerformanceFrequency();
+		AutoTuneShare((end - WindowStartTicks - WindowJobTicks) * us, WindowWaitTicks * us, WindowMainDrawTicks * us, workerMicros);
+	}
 }
 
 bool R_DrawerQueueActive()
@@ -682,7 +790,7 @@ void R_DrawerSync()
 	if (!WindowActive) return;
 	Publish();
 	unsigned w = LocalWrite;
-	Drain(Consumers[0], w);
+	DrainMain(w);
 	bool pending = false;
 	for (int i = 1; i < NUM_CONSUMERS; ++i)
 	{
@@ -703,6 +811,10 @@ void R_DrawerParallelRows(FParallelRowsJob fn, void *ctx, int rows)
 		return;
 	}
 	if (WindowActive) R_DrawerSync();
+	// Jobs are split evenly whatever the share, so the share tuner leaves
+	// them out of its measurements.
+	const Uint64 jobStart = SDL_GetPerformanceCounter();
+	const Uint64 savedWait = WindowWaitTicks;
 	// Everyone is otherwise idle here: the game thread takes a third, the
 	// workers split the rest with the current drawing balance.
 	int mainrows = rows / 3;
@@ -720,6 +832,8 @@ void R_DrawerParallelRows(FParallelRowsJob fn, void *ctx, int rows)
 	Publish();
 	fn(ctx, 0, mainrows);
 	WaitForWorkers(LocalWrite, false);
+	WindowWaitTicks = savedWait;
+	WindowJobTicks += SDL_GetPerformanceCounter() - jobStart;
 }
 
 FDrawerInlineScope::FDrawerInlineScope()
@@ -762,7 +876,8 @@ void R_DrawerTakeStats(FDrawerStats &out)
 		out.busyMicros[w] = ThreadsStarted && !ThreadsFailed ? Consumers[w + 1].busyMicros.exchange(0) : 0;
 	}
 	out.active = ThreadsStarted && !ThreadsFailed && vita_drawthreads;
-	out.mainshare = vita_drawmainshare;
+	out.mainshare = CurrentShare;
+	out.mainshareAuto = vita_drawshare < 0;
 	out.worker1Percent = WorkerSplit * 100 / SPLIT_ONE;
 }
 

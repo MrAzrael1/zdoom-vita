@@ -61,9 +61,52 @@
 #include "posix/vita_perf.h"
 #include "posix/vita_loadpool.h"
 #include "posix/vita_bulkread.h"
+#include "thingdef/thingdef.h"
 #include <algorithm>
 #include <unordered_set>
 #include <vector>
+
+// Marks every sprite frame (all rotations) used by any state of 'type',
+// including inherited states, with 'mark' in 'want' (keeping higher marks).
+static void VitaMarkClassSprites(const PClass *type, BYTE *want, BYTE mark)
+{
+	for (const PClass *owner = type; owner && owner->ActorInfo; owner = owner->ParentClass)
+	{
+		FActorInfo *info = owner->ActorInfo;
+		for (int state = 0; state < info->NumOwnedStates; ++state)
+		{
+			unsigned sprite = info->OwnedStates[state].sprite;
+			if (sprite >= sprites.Size()) continue;
+			for (int frame = 0; frame < sprites[sprite].numframes; ++frame)
+			{
+				const spriteframe_t &sf = SpriteFrames[sprites[sprite].spriteframes + frame];
+				for (int rot = 0; rot < 16; ++rot)
+				{
+					if (!sf.Texture[rot].isValid()) continue;
+					BYTE &w = want[sf.Texture[rot].GetIndex()];
+					if (w < mark) w = mark;
+				}
+			}
+		}
+	}
+}
+
+// Adds an actor class, what replaces it, and the classes in its drop list
+// (which is also how RandomSpawner lists what it can become), recursively.
+static void VitaAddMapClass(const PClass *type, std::unordered_set<const PClass *> &classes)
+{
+	if (type == NULL || type->ActorInfo == NULL || !classes.insert(type).second) return;
+	FActorInfo *rep = type->ActorInfo->GetReplacement(false);
+	if (rep != NULL && rep->Class != type) VitaAddMapClass(rep->Class, classes);
+	const unsigned index = unsigned(type->Meta.GetMetaInt(ACMETA_DropItems) - 1);
+	if (index < DropItemList.Size())
+	{
+		for (FDropItem *di = DropItemList[index]; di != NULL; di = di->Next)
+		{
+			if (di->Name != NAME_None) VitaAddMapClass(PClass::FindClass(di->Name), classes);
+		}
+	}
+}
 
 // Fetches a texture's lump (still compressed) on the game thread through the
 // bulk reader; inflates and decodes it on any core.
@@ -1300,7 +1343,7 @@ void FTextureManager::PrecacheLevel (void)
 	// pixels never exceed the budget.
 	BYTE *effects = NULL;
 	size_t effectBytes = 0, effectBudget = 0;
-	unsigned effectKept = 0, effectSkipped = 0;
+	unsigned effectKept = 0, effectSkipped = 0, mapSprites = 0, mapClasses = 0;
 	if (vita_precacheeffects)
 	{
 		// Prefetch sprites for non-normal styles, projectiles and noninteractive effects.
@@ -1315,32 +1358,40 @@ void FTextureManager::PrecacheLevel (void)
 			if (!defaults) continue;
 			if (defaults->RenderStyle == LegacyRenderStyles[STYLE_Normal] &&
 				!(defaults->flags & MF_MISSILE) && !(defaults->flags5 & MF5_NOINTERACTION)) continue;
-			for (const PClass *owner = type; owner && owner->ActorInfo; owner = owner->ParentClass)
+			VitaMarkClassSprites(type, effects, 1);
+		}
+		// The stock precache only takes each actor's current sprite (usually
+		// its idle or walk frames), so a monster's attack, pain and death
+		// sprites were decoded the first time it used them, mid-fight. Take
+		// every sprite of every class in the map, of what replaces it and of
+		// what its drop list or random spawner can produce, ahead of the
+		// generic effects.
+		{
+			std::unordered_set<const PClass *> classes;
+			TThinkerIterator<AActor> it;
+			AActor *mo;
+			while ((mo = it.Next()) != NULL) VitaAddMapClass(mo->GetClass(), classes);
+			for (std::unordered_set<const PClass *>::const_iterator c = classes.begin(); c != classes.end(); ++c)
+				VitaMarkClassSprites(*c, effects, 2);
+			mapClasses = unsigned(classes.size());
+		}
+		// Map-actor sprites first, then effects, within one budget. 3 = kept.
+		effectBudget = I_VitaPrecacheBudget(true);
+		for (int pass = 2; pass >= 1; --pass)
+		{
+			for (int i = 0; i < cnt; ++i)
 			{
-				FActorInfo *info = owner->ActorInfo;
-				for (int state = 0; state < info->NumOwnedStates; ++state)
-				{
-					unsigned sprite = info->OwnedStates[state].sprite;
-					if (sprite >= sprites.Size()) continue;
-					for (int frame = 0; frame < sprites[sprite].numframes; ++frame)
-					{
-						const spriteframe_t &sf = SpriteFrames[sprites[sprite].spriteframes + frame];
-						for (int rot = 0; rot < 16; ++rot)
-							if (sf.Texture[rot].isValid()) effects[sf.Texture[rot].GetIndex()] = 1;
-					}
-				}
+				if (effects[i] != pass) continue;
+				FTexture *tex = ByIndex(i);
+				if (hitlist[i] || !tex) { effects[i] = 0; continue; }
+				size_t size = size_t(tex->GetWidth()) * tex->GetHeight();
+				if (!size || size > effectBudget - effectBytes) { effects[i] = 0; ++effectSkipped; continue; }
+				effectBytes += size;
+				effects[i] = 3;
+				if (pass == 2) ++mapSprites;
 			}
 		}
-		effectBudget = I_VitaPrecacheBudget(true);
-		for (int i = 0; i < cnt; ++i)
-		{
-			FTexture *tex = ByIndex(i);
-			if (!effects[i]) continue;
-			if (hitlist[i] || !tex) { effects[i] = 0; continue; }
-			size_t size = size_t(tex->GetWidth()) * tex->GetHeight();
-			if (!size || size > effectBudget - effectBytes) { effects[i] = 0; ++effectSkipped; continue; }
-			effectBytes += size;
-		}
+		for (int i = 0; i < cnt; ++i) effects[i] = effects[i] == 3;
 	}
 	// A texture can draw its pixels from another texture object: a TEXTURES
 	// definition with one same-sized patch redirects to that patch, which has
@@ -1442,8 +1493,8 @@ void FTextureManager::PrecacheLevel (void)
 			++effectKept;
 		}
 		delete[] effects;
-		I_VitaTrace("[Vita] Preload: effect sprites=%u pixels=%u KiB of %u KiB budget-skipped=%u decoded=%u patches-kept=%u%s%s\n",
-			effectKept, unsigned(effectBytes/1024), unsigned(effectBudget/1024), effectSkipped,
+		I_VitaTrace("[Vita] Preload: sprites=%u (map actors %u from %u classes, rest effects) pixels=%u KiB of %u KiB budget-skipped=%u decoded=%u patches-kept=%u%s%s\n",
+			effectKept, mapSprites, mapClasses, unsigned(effectBytes/1024), unsigned(effectBudget/1024), effectSkipped,
 			decoded, sharedSkips, decoded ? " e.g." : "", examples.GetChars());
 	}
 	I_VitaLoadMark(VLOAD_EFFECT_SPRITES);

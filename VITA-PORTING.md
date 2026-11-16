@@ -1000,3 +1000,54 @@ on, a 60 fps or unlimited cap is paced by the renderer itself; lower caps hold
 each frame for a whole number of refreshes counted with sceDisplayGetVcount /
 sceDisplayWaitVblankStart (30 fps = every second refresh), so the cadence
 cannot drift against a timer. SceDisplay_stub is linked explicitly.
+
+### v0.13.0 first-sight sprite preload
+
+The stock precache (DFrameBuffer::GetHitlist) only marks each spawned actor's
+current sprite, so monsters whose attack, pain or death frames use other
+sprite names (common in Boltgun) decoded them the first time they were used,
+mid-fight. With Preload effects on, PrecacheLevel now also collects every
+class present after spawning (monsters, and the player's inventory including
+weapons), what replaces them, and the classes in their drop lists (which is
+also how RandomSpawner lists its candidates), recursively, and marks every
+sprite frame of all their states (inherited included). These go into the
+effect budget ahead of the generic effect sprites (pass 2, then effects), are
+decoded by the parallel loader, and stay resident between maps like effects.
+The preload trace reports "map actors N from M classes".
+
+### v0.13.0 automatic game-thread draw share
+
+The "Game thread draw share" menu slider (vita_drawmainshare) is replaced by
+vita_drawshare, default -1 = automatic (0..4 still fixes it, console only; a
+new name so saved slider values do not pin the share). After each view window
+r_draw_mt.cpp records the window's wall time and the game thread's final sync
+wait. Every 45 windows the tuner compares the current share with one probed
+neighbour and keeps the neighbour only if it rendered at least 3% faster; the
+wait picks the direction (waiting > 10% of the window: workers are the
+bottleneck, try +1; waiting < 2%: the game thread is, try -1 or stay at 0),
+then rests 8 samples. A cost-model simulation (game-thread-bound, balanced
+and pixel-bound scenes with +-4% jitter) settles within 0-2% of the best
+fixed share. The Draw threads trace shows "main-share=N/8 (auto)". The draw
+thread tests (renamed cvar) pass at fixed shares 0-4 under ASan/UBSan/TSan.
+
+### v0.13.0 measured draw-share tuner
+
+A NERVE MAP05 stress trace showed the trial-and-error tuner drifting the share
+up to 4/8 during heavy fights while the game thread never waited (wait 0.00
+ms, workers only ~3-5 ms busy, walls/BSP 5-11 ms): with frame times swinging
+by tens of percent between 0.75 s samples, base-vs-probe comparisons were
+decided by the scene, not the share. The tuner now measures the costs
+directly instead. Per window it records the game thread's own drawing time
+(DrainMain), its waits on the workers (final sync and ring-full stalls), the
+workers' drawing time, and the window time; parallel-rows jobs (split evenly
+whatever the share) are left out on both sides. Every 30 windows: one more
+step of rows (1/8, costed from what the game thread's rows actually took)
+costs the game thread a step and saves each worker half a step, so the share
+goes up only if the game thread waited longer than a step; it goes down when
+the game thread hardly waited (< 2%) and would still finish last after
+handing a step to the workers, with half a step of margin. Two consecutive
+samples must agree before each step. A cost-model simulation with +-30%
+per-window scene swings (light, game-thread-bound, stress and pixel-bound
+scenes) stays put at or within ~3% of the best fixed share with no
+oscillation; on the stress-trace numbers it settles at 0/8. Draw-thread tests
+pass under ASan/UBSan/TSan.

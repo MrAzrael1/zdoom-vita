@@ -115,7 +115,7 @@ def main():
     short *mfloorclip, *mceilingclip;
     void (*colfunc)(void);
     DWORD Col2RGB8[65][256];	// read-only blend table (shaded columns)
-    extern int vita_drawthreads, vita_drawmainshare;
+    extern int vita_drawthreads, vita_drawshare;
     ''')
     body = prelude + '\n'.join(originals) + '\n' + '\n'.join(kernels) + '\n'
     body += (ROOT / 'tests/vita_draw_threads_harness.inc').read_text()
